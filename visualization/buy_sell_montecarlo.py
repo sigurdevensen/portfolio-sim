@@ -5,7 +5,7 @@ import pandas as pd
 from data.loader import load_csv
 from data.cleaner import fill_na_values
 
-from strategies.index_buy_sell_randomly import buy_sell_randomly
+from strategies.buy_sell_randomly import buy_sell_randomly
 
 
 def plot_buy_sell_index(
