@@ -13,7 +13,7 @@ def buy_sell_randomly(data: pd.DataFrame, capital: float = 10000.0) -> list[floa
     portfolio_values = []
 
     for price, buy in zip(prices, is_buy):
-        if buy and capital >= price:
+        if buy and capital > 0:
             number_of_stocks = capital / price
             capital = 0.0
         elif not buy and number_of_stocks > 0:
