@@ -5,19 +5,22 @@ from data.loader import load_csv
 from data.cleaner import fill_na_values
 
 
-def buy_sell_randomly(data: pd.DataFrame, capital: float = 10000.0) -> list[float]:
+def buy_sell_randomly(
+        data: pd.DataFrame, 
+        capital: float = 10000.0, 
+        fee_rate: float = 0.0015
+    ) -> list[float]:
     prices = data.iloc[:, 0].to_numpy()
     is_buy = np.random.random(len(prices)) < 0.5
 
     number_of_stocks = 0.0
     portfolio_values = []
-
     for price, buy in zip(prices, is_buy):
         if buy and capital > 0:
-            number_of_stocks = capital / price
+            number_of_stocks = capital * (1 - fee_rate) / price
             capital = 0.0
         elif not buy and number_of_stocks > 0:
-            capital += number_of_stocks * price
+            capital += number_of_stocks * price * (1 - fee_rate)
             number_of_stocks = 0.0
         portfolio_values.append(capital + number_of_stocks * price)
 
@@ -26,7 +29,7 @@ def buy_sell_randomly(data: pd.DataFrame, capital: float = 10000.0) -> list[floa
 def main():
     loaded_data = load_csv("data/raw/EQNR_OL_monthly.csv")
     loaded_data = fill_na_values(loaded_data) # ffill NA values in the DataFrame
-    print(buy_sell_randomly(loaded_data, capital=10000.0))
+    print(buy_sell_randomly(loaded_data, capital=10000.0, fee_rate=0.0015))
 
 
 if __name__ == "__main__":
