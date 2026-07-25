@@ -10,6 +10,8 @@ def plot_nav(
     benchmark: pd.Series | None = None,
     title: str = "Portfolio NAV",
 ) -> plt.Figure:
+    
+    
     fig, ax = plt.subplots(figsize=(12, 5))
     nav_normalised = nav / nav.iloc[0] * 100
     ax.plot(nav_normalised.index, nav_normalised.values, label="Strategy", linewidth=1.5)

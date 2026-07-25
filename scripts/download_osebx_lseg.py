@@ -27,7 +27,7 @@ RIC = ".OSEBX"
 EIKON_FIELDS = ["OPEN", "HIGH", "LOW", "CLOSE", "VOLUME"]
 # OSEBX history starts around 1996-01-02
 HISTORY_START = "1996-01-01"
-OUT_PATH = Path(__file__).parent.parent / "data" / "raw" / "osebx_daily.csv"
+OUT_PATH = Path(__file__).parent.parent / "data" / "raw" / "osebx_monthly.csv"
 
 
 def _fetch_lseg_data() -> pd.DataFrame:
@@ -43,7 +43,7 @@ def _fetch_lseg_data() -> pd.DataFrame:
     try:
         df = ld.get_history(
             universe=RIC,
-            interval="daily",
+            interval="monthly",
             start=HISTORY_START,
             end=date.today().isoformat(),
         )
@@ -81,39 +81,6 @@ def _normalise_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df[keep]
 
 
-def _fetch_eikon(chunk_years: int = 5) -> pd.DataFrame:
-    """Fetch via the legacy eikon library, chunked to stay under the row limit."""
-    import eikon as ek
-
-    # App key is read from the Eikon desktop session automatically when
-    # Workspace is running; no explicit set_app_key() call needed in most setups.
-    # If you do need one: ek.set_app_key("YOUR_APP_KEY_HERE")
-
-    chunks: list[pd.DataFrame] = []
-    start = pd.Timestamp(HISTORY_START)
-    end = pd.Timestamp(date.today())
-
-    current = start
-    while current < end:
-        chunk_end = min(current + pd.DateOffset(years=chunk_years), end)
-        print(f"  Fetching {current.date()} to {chunk_end.date()}...")
-        chunk = ek.get_timeseries(
-            RIC,
-            fields=EIKON_FIELDS,
-            start_date=current.strftime("%Y-%m-%d"),
-            end_date=chunk_end.strftime("%Y-%m-%d"),
-            interval="daily",
-        )
-        if chunk is not None and not chunk.empty:
-            chunks.append(chunk)
-        current = chunk_end + pd.DateOffset(days=1)
-
-    if not chunks:
-        return pd.DataFrame()
-
-    df = pd.concat(chunks)
-    df = df[~df.index.duplicated(keep="first")].sort_index()
-    return df
 
 
 def main() -> None:
