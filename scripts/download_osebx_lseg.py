@@ -22,21 +22,27 @@ from pathlib import Path
 import pandas as pd
 
 RIC = ".OSEBX"
-FIELDS = ["OPEN", "HIGH", "LOW", "CLOSE", "VOLUME"]
+# eikon.get_timeseries uses these short names; lseg-data omits fields entirely
+# so the API returns its default price columns for the instrument type.
+EIKON_FIELDS = ["OPEN", "HIGH", "LOW", "CLOSE", "VOLUME"]
 # OSEBX history starts around 1996-01-02
 HISTORY_START = "1996-01-01"
 OUT_PATH = Path(__file__).parent.parent / "data" / "raw" / "osebx_daily.csv"
 
 
 def _fetch_lseg_data() -> pd.DataFrame:
-    """Fetch via the modern lseg-data library (recommended)."""
+    """Fetch via the modern lseg-data library (recommended).
+
+    No explicit fields are passed — the API returns its default columns for
+    the instrument type (typically TRDPRC_1, HIGH_1, LOW_1, OPEN_PRC, ACVOL_UNS
+    for index RICs). They are renamed to Open/High/Low/Close/Volume afterwards.
+    """
     import lseg.data as ld
 
     ld.open_session()
     try:
         df = ld.get_history(
             universe=RIC,
-            fields=FIELDS,
             interval="daily",
             start=HISTORY_START,
             end=date.today().isoformat(),
@@ -44,7 +50,35 @@ def _fetch_lseg_data() -> pd.DataFrame:
     finally:
         ld.close_session()
 
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    # Normalise whatever column names the API returned
+    df = _normalise_columns(df)
     return df
+
+
+# Maps known LSEG/RDP field names to our standard output names
+_COLUMN_MAP = {
+    "TRDPRC_1": "Close",
+    "HIGH_1": "High",
+    "LOW_1": "Low",
+    "OPEN_PRC": "Open",
+    "ACVOL_UNS": "Volume",
+    # already-capitalised fallbacks
+    "OPEN": "Open",
+    "HIGH": "High",
+    "LOW": "Low",
+    "CLOSE": "Close",
+    "VOLUME": "Volume",
+}
+
+
+def _normalise_columns(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.rename(columns=_COLUMN_MAP)
+    # Keep only recognised columns; drop anything else (e.g. metadata fields)
+    keep = [c for c in ["Open", "High", "Low", "Close", "Volume"] if c in df.columns]
+    return df[keep]
 
 
 def _fetch_eikon(chunk_years: int = 5) -> pd.DataFrame:
@@ -62,10 +96,10 @@ def _fetch_eikon(chunk_years: int = 5) -> pd.DataFrame:
     current = start
     while current < end:
         chunk_end = min(current + pd.DateOffset(years=chunk_years), end)
-        print(f"  Fetching {current.date()} → {chunk_end.date()}...")
+        print(f"  Fetching {current.date()} to {chunk_end.date()}...")
         chunk = ek.get_timeseries(
             RIC,
-            fields=FIELDS,
+            fields=EIKON_FIELDS,
             start_date=current.strftime("%Y-%m-%d"),
             end_date=chunk_end.strftime("%Y-%m-%d"),
             interval="daily",
@@ -117,14 +151,13 @@ def main() -> None:
 
     df.index = pd.to_datetime(df.index).tz_localize(None)
     df.index.name = "Date"
-    df.columns = [c.capitalize() for c in df.columns]  # Open, High, Low, Close, Volume
 
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(OUT_PATH)
 
     start_str = df.index[0].strftime("%Y-%m-%d")
     end_str = df.index[-1].strftime("%Y-%m-%d")
-    print(f"Saved {len(df)} rows ({start_str} → {end_str}) to {OUT_PATH}")
+    print(f"Saved {len(df)} rows ({start_str} to {end_str}) to {OUT_PATH}")
 
 
 if __name__ == "__main__":
