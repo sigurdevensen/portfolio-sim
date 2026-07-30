@@ -1,0 +1,74 @@
+{
+  "period": "1996\u20132026",
+  "n_months": 335,
+  "osebx": {
+    "cagr_pct": 11.26,
+    "annualised_vol_pct": 19.45,
+    "sharpe_vs_savings": 0.495,
+    "max_drawdown_pct": -57.77,
+    "calmar_ratio": 0.195,
+    "var95_monthly_pct": 8.1,
+    "var99_monthly_pct": 16.79,
+    "cvar95_monthly_pct": 13.88,
+    "skewness": -1.009,
+    "excess_kurtosis": 3.818,
+    "total_return_pct": 1889.9
+  },
+  "savings": {
+    "cagr_pct": 3.06,
+    "annualised_vol_pct": 0.63,
+    "var95_monthly_pct": -0.02,
+    "total_return_pct": 132.7,
+    "mean_annual_rate_pct": 3.1
+  },
+  "comparison": {
+    "annual_win_rate_pct": 70.0,
+    "outperformance_prob_by_horizon": {
+      "1": 71.2,
+      "3": 76.3,
+      "5": 87.6,
+      "10": 98.6,
+      "15": 100.0,
+      "20": 100.0
+    }
+  },
+  "drawdown_episodes": [
+    {
+      "peak": "2007-08-31",
+      "trough": "2009-02-28",
+      "recovery": "2013-10-31",
+      "drawdown_pct": -57.8,
+      "duration_days": 2253
+    },
+    {
+      "peak": "2001-07-31",
+      "trough": "2003-02-28",
+      "recovery": "2004-11-30",
+      "drawdown_pct": -53.9,
+      "duration_days": 1218
+    },
+    {
+      "peak": "1998-07-31",
+      "trough": "1998-09-30",
+      "recovery": "2000-06-30",
+      "drawdown_pct": -38.9,
+      "duration_days": 700
+    },
+    {
+      "peak": "2020-02-29",
+      "trough": "2020-03-31",
+      "recovery": "2020-12-31",
+      "drawdown_pct": -24.6,
+      "duration_days": 306
+    }
+  ],
+  "monte_carlo_10yr": {
+    "pct5": 108.0,
+    "pct25": 198.0,
+    "median": 294.9,
+    "pct75": 440.2,
+    "pct95": 793.9,
+    "savings_final": 135.4,
+    "prob_beat_pct": 90.3
+  }
+}
