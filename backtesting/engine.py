@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -90,6 +90,7 @@ class BacktestEngine:
 
                 price = valid_prices[ticker]
 
+                # No pyramiding: only enter a long if no position currently held
                 if sig == 1 and ticker not in portfolio.positions:
                     target_alloc = nav_start / n_tickers
                     shares = math.floor(target_alloc / price)
@@ -97,7 +98,8 @@ class BacktestEngine:
                         continue
                     order = Order(ticker=ticker, direction=1, quantity=float(shares), timestamp=date)
                     fill = fill_sim.execute(order, price)
-                    try:
+                    estimated_cost = fill.order.quantity * fill.fill_price * (1 + fill.commission_rate)
+                    if estimated_cost <= portfolio.cash:
                         portfolio.buy(ticker, fill.order.quantity, fill.fill_price, fill.commission_rate)
                         fills_log.append({
                             "date": date,
@@ -107,14 +109,12 @@ class BacktestEngine:
                             "fill_price": fill.fill_price,
                             "commission": fill.order.quantity * fill.fill_price * fill.commission_rate,
                         })
-                    except ValueError:
-                        pass
 
                 elif sig == -1 and ticker in portfolio.positions:
                     shares = portfolio.positions[ticker].shares
                     order = Order(ticker=ticker, direction=-1, quantity=shares, timestamp=date)
                     fill = fill_sim.execute(order, price)
-                    try:
+                    if portfolio.positions.get(ticker) and portfolio.positions[ticker].shares >= fill.order.quantity:
                         portfolio.sell(ticker, fill.order.quantity, fill.fill_price, fill.commission_rate)
                         fills_log.append({
                             "date": date,
@@ -124,8 +124,6 @@ class BacktestEngine:
                             "fill_price": fill.fill_price,
                             "commission": fill.order.quantity * fill.fill_price * fill.commission_rate,
                         })
-                    except ValueError:
-                        pass
 
             portfolio.record_nav(date, valid_prices)
             prior_signals = {t: int(current_signals.get(t, 0)) for t in tickers}

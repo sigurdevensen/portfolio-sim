@@ -23,13 +23,6 @@ class AlwaysBuyStrategy(Strategy):
         return pd.DataFrame(1, index=data.index, columns=data.columns)
 
 
-class AlwaysSellStrategy(Strategy):
-    name = "always_sell"
-
-    def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
-        return pd.DataFrame(-1, index=data.index, columns=data.columns)
-
-
 class HoldStrategy(Strategy):
     name = "hold"
 
@@ -94,3 +87,10 @@ def test_multi_ticker_both_traded():
     traded_tickers = set(result.trades["ticker"].unique())
     assert "AAA" in traded_tickers
     assert "BBB" in traded_tickers
+
+
+def test_empty_date_range_raises():
+    prices = _prices(50)
+    engine = BacktestEngine(BacktestConfig(start="2030-01-01", end="2030-12-31"))
+    with pytest.raises(ValueError, match="No price data"):
+        engine.run(AlwaysBuyStrategy(), prices)
