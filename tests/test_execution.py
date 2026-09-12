@@ -1,4 +1,3 @@
-import math
 import pytest
 from execution.order import Order, Fill
 from execution.fill import FillSimulator
@@ -44,3 +43,30 @@ def test_fill_preserves_order():
     fill = sim.execute(order, close_price=50.0)
     assert fill.order is order
     assert fill.order.quantity == 200.0
+
+
+def test_order_invalid_direction_raises():
+    with pytest.raises(ValueError, match="direction"):
+        Order(ticker="X", direction=99, quantity=100.0, timestamp=pd.Timestamp("2024-01-02", tz="UTC"))
+
+
+def test_order_zero_quantity_raises():
+    with pytest.raises(ValueError, match="quantity"):
+        Order(ticker="X", direction=1, quantity=0.0, timestamp=pd.Timestamp("2024-01-02", tz="UTC"))
+
+
+def test_order_negative_quantity_raises():
+    with pytest.raises(ValueError, match="quantity"):
+        Order(ticker="X", direction=1, quantity=-5.0, timestamp=pd.Timestamp("2024-01-02", tz="UTC"))
+
+
+def test_fill_simulator_negative_slippage_raises():
+    with pytest.raises(ValueError, match="slippage"):
+        FillSimulator(slippage=-0.01)
+
+
+def test_execute_zero_close_price_raises():
+    sim = FillSimulator()
+    order = Order(ticker="X", direction=1, quantity=10.0, timestamp=pd.Timestamp("2024-01-02", tz="UTC"))
+    with pytest.raises(ValueError, match="close_price"):
+        sim.execute(order, close_price=0.0)
