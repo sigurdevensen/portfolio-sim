@@ -29,7 +29,7 @@ class Pipeline:
 
     Usage::
 
-        result = (
+        pipeline = (
             Pipeline(
                 strategy=MomentumStrategy(lookback=60, top_n=5),
                 tickers=["EQNR.OL", "DNB.OL"],
