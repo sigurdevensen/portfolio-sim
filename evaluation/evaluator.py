@@ -1,12 +1,14 @@
 """Evaluator: assembles a BacktestReport from a BacktestResult."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import pandas as pd
 
 from backtesting.metrics import BacktestResult
-from risk.drawdown import RecoveryPeriod, drawdown_series, recovery_periods
+from risk.drawdown import RecoveryPeriod
+from risk.drawdown import drawdown_series as compute_drawdown_series
+from risk.drawdown import recovery_periods
 from risk.var import conditional_var, value_at_risk
 
 
@@ -38,7 +40,7 @@ class Evaluator:
         Args:
             result: Completed backtest result.
             strategy_name: Human-readable strategy label used in the report.
-            benchmark: Optional benchmark NAV series for alpha/beta calculation.
+            benchmark: Reserved for future alpha/beta calculation (not yet implemented).
             prices: Optional multi-ticker price DataFrame for correlation matrix.
 
         Returns:
@@ -49,7 +51,7 @@ class Evaluator:
         var_95 = value_at_risk(returns, confidence=0.95, method="historical")
         var_99 = value_at_risk(returns, confidence=0.99, method="historical")
         cvar_95 = conditional_var(returns, confidence=0.95)
-        dd_series = drawdown_series(result.nav)
+        dd_series = compute_drawdown_series(result.nav)
         rec_periods = recovery_periods(result.nav)
 
         corr: pd.DataFrame | None = None
