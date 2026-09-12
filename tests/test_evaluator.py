@@ -76,3 +76,46 @@ def test_correlation_matrix_with_prices():
     report = Evaluator().evaluate(result, prices=prices)
     assert report.correlation_matrix is not None
     assert report.correlation_matrix.shape == (2, 2)
+
+
+# ── Reporter tests ─────────────────────────────────────────────────────────
+
+from evaluation.reporter import MarkdownReporter
+
+
+def test_reporter_writes_report_md(tmp_path):
+    result = _make_result()
+    report = Evaluator().evaluate(result, strategy_name="momentum")
+    reporter = MarkdownReporter()
+    md_path = reporter.write(report, output_dir=tmp_path)
+    assert md_path.exists()
+    assert md_path.name == "report.md"
+
+
+def test_report_contains_strategy_name(tmp_path):
+    result = _make_result()
+    report = Evaluator().evaluate(result, strategy_name="momentum")
+    reporter = MarkdownReporter()
+    md_path = reporter.write(report, output_dir=tmp_path)
+    content = md_path.read_text()
+    assert "momentum" in content
+
+
+def test_report_contains_sharpe_section(tmp_path):
+    result = _make_result()
+    report = Evaluator().evaluate(result)
+    reporter = MarkdownReporter()
+    md_path = reporter.write(report, output_dir=tmp_path)
+    content = md_path.read_text()
+    assert "Sharpe" in content
+    assert "VaR" in content
+
+
+def test_report_saves_charts(tmp_path):
+    result = _make_result()
+    report = Evaluator().evaluate(result)
+    reporter = MarkdownReporter()
+    reporter.write(report, output_dir=tmp_path)
+    assert (tmp_path / "nav_curve.png").exists()
+    assert (tmp_path / "drawdown.png").exists()
+    assert (tmp_path / "returns_dist.png").exists()
