@@ -11,10 +11,14 @@ except ImportError:
     ld = None  # type: ignore[assignment]
 
 _LSEG_CACHE = Path(__file__).parent / "cache" / "lseg"
-_LSEG_CACHE.mkdir(parents=True, exist_ok=True)
 
-_FUNDAMENTAL_FIELDS = ["TR.PE", "TR.EPS", "TR.BookValuePerShare", "TR.CompanyMarketCap", "TR.DPS"]
-_FUNDAMENTAL_FIELD_LABELS = ["P/E", "EPS", "BV/SH", "MKT_CAP", "DPS"]
+_FUNDAMENTAL_FIELD_MAP = {
+    "TR.PE": "P/E",
+    "TR.EPS": "EPS",
+    "TR.BookValuePerShare": "BV/SH",
+    "TR.CompanyMarketCap": "MKT_CAP",
+    "TR.DPS": "DPS",
+}
 
 
 class LSEGDataFeed:
@@ -50,7 +54,7 @@ class LSEGDataFeed:
         Raises:
             RuntimeError: If the LSEG Workspace session is unavailable.
         """
-        cache_key = "_".join(sorted(tickers)) + f"_{start}_{end}_{frequency}"
+        cache_key = "|".join(sorted(tickers)) + f"_{start}_{end}_{frequency}"
         cache_path = self.cache_dir / f"prices_{cache_key}.parquet"
 
         if self.use_cache and cache_path.exists():
@@ -88,7 +92,7 @@ class LSEGDataFeed:
             tickers: LSEG RIC codes.
 
         Returns:
-            Nested dict: {ticker: {field: value}}.
+            Nested dict: {ticker: {label: value}} with human-readable field labels.
 
         Raises:
             RuntimeError: If the LSEG Workspace session is unavailable.
@@ -101,14 +105,14 @@ class LSEGDataFeed:
         try:
             df = ld.get_data(
                 universe=tickers,
-                fields=_FUNDAMENTAL_FIELDS,
+                fields=list(_FUNDAMENTAL_FIELD_MAP.keys()),
             )
         except Exception as exc:
             raise RuntimeError(
                 f"LSEG session error: {exc}. Ensure LSEG Workspace is running."
             ) from exc
 
-        df.columns = _FUNDAMENTAL_FIELD_LABELS[: len(df.columns)]
+        df = df.rename(columns=_FUNDAMENTAL_FIELD_MAP)
         return {idx: row.to_dict() for idx, row in df.iterrows()}
 
     def fetch_index_constituents(self, index_ric: str) -> list[str]:
@@ -145,21 +149,29 @@ class LSEGDataFeed:
 
     @staticmethod
     def _normalise_price_df(raw: pd.DataFrame, tickers: list[str]) -> pd.DataFrame:
-        """Extract close prices, handling both TRDPRC_1 and OFF_CLOSE column names."""
+        """Extract close prices from ld.get_history() response.
+
+        Expects columns named by ticker (TRDPRC_1 or OFF_CLOSE as fallback for single-ticker).
+        Raises ValueError if multi-ticker response doesn't have per-ticker columns.
+        """
         raw.index = pd.to_datetime(raw.index, utc=True)
 
         if set(tickers).issubset(set(raw.columns)):
-            # ld.get_history returned a column per ticker directly
-            prices = raw[tickers].copy()
-        else:
-            # Multi-level or single-ticker with field columns
-            prices = pd.DataFrame(index=raw.index)
-            for ticker in tickers:
-                if ticker in raw.columns:
-                    prices[ticker] = raw[ticker]
-                elif "TRDPRC_1" in raw.columns:
-                    prices[ticker] = raw["TRDPRC_1"]
-                elif "OFF_CLOSE" in raw.columns:
-                    prices[ticker] = raw["OFF_CLOSE"]
+            # Standard shape: one column per ticker
+            return raw[tickers].copy()
 
-        return prices
+        if len(tickers) == 1:
+            # Single ticker with field columns: pick TRDPRC_1 or OFF_CLOSE
+            ticker = tickers[0]
+            for col in ("TRDPRC_1", "OFF_CLOSE"):
+                if col in raw.columns:
+                    return pd.DataFrame({ticker: raw[col]}, index=raw.index)
+            raise ValueError(
+                f"Cannot find close price column for {ticker}. "
+                f"Available columns: {list(raw.columns)}"
+            )
+
+        raise ValueError(
+            f"LSEG returned field-per-column response for {tickers}, "
+            f"expected one column per ticker. Columns: {list(raw.columns)}"
+        )

@@ -50,7 +50,7 @@ def test_fetch_prices_caches_result(mock_ld, tmp_path):
 @patch("data.lseg.ld")
 def test_fetch_fundamentals_returns_dict(mock_ld):
     mock_ld.get_data.return_value = pd.DataFrame(
-        {"P/E": [12.5], "EPS": [3.1]},
+        {"TR.PE": [12.5], "TR.EPS": [3.1]},
         index=["EQNR.OL"],
     )
     feed = LSEGDataFeed(use_cache=False)
@@ -58,6 +58,8 @@ def test_fetch_fundamentals_returns_dict(mock_ld):
     assert isinstance(result, dict)
     assert "EQNR.OL" in result
     assert "P/E" in result["EQNR.OL"]
+    assert result["EQNR.OL"]["P/E"] == pytest.approx(12.5)
+    assert result["EQNR.OL"]["EPS"] == pytest.approx(3.1)
 
 
 @patch("data.lseg.ld")
