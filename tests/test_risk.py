@@ -45,4 +45,4 @@ def test_drawdown_series_non_positive():
 
 def test_max_drawdown_known_series():
     nav = pd.Series([100.0, 120.0, 80.0, 100.0])
-    assert max_drawdown(nav) == pytest.approx(-80 / 120 + 1 - 1, abs=1e-6)
+    assert max_drawdown(nav) == pytest.approx((80 - 120) / 120, abs=1e-6)
