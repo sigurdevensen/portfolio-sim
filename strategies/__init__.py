@@ -1,10 +1,14 @@
 from .anomalies import (
     ANOMALY_FAMILIES,
     DividendYieldRank,
+    HighVolumePremium,
     IlliquidityRank,
     LongTermReversal,
     LowBetaRank,
+    LowIdioVol,
+    LowMaxReturn,
     RelativeVolRegime,
+    SameMonthSeasonality,
     SectorMomentum,
 )
 from .base import Strategy
@@ -74,5 +78,6 @@ __all__ = [
     "RelativeToIndex", "IndexDipBuy", "VIXSpikeReversal", "USLeadLag",
     "DividendCapture", "PostDividendReversal", "WeeklyReversal",
     "DividendYieldRank", "LowBetaRank", "LongTermReversal", "RelativeVolRegime", "SectorMomentum", "IlliquidityRank",
+    "SameMonthSeasonality", "LowMaxReturn", "LowIdioVol", "HighVolumePremium",
     "RandomSignal",
 ]

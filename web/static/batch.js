@@ -88,6 +88,7 @@
     parts.push(luck
       ? "Verdict: the best result is consistent with luck after accounting for the number of trials."
       : "Verdict: the best result is not explained by selection alone. " + s.n_strong + " algorithm(s) pass every gate.");
+    if (s.n_alpha_strong != null) parts.push("Beta-adjusted view (Jensen alpha, HAC t-stat, FDR over N): " + s.n_alpha_strong + " strong, " + (s.n_alpha_candidate || 0) + " candidate(s).");
     if (s.n_random_controls_strong > 0) parts.push("WARNING: " + s.n_random_controls_strong + " random control(s) were flagged strong — treat every result with suspicion.");
     return el("div", { class: "verdict " + cls, text: parts.join(" ") });
   }
@@ -111,6 +112,9 @@
     wrap.appendChild(tile("IS→OOS rank corr.", fmt.num(s.is_oos_rank_corr), "", "Spearman across algorithms"));
     wrap.appendChild(tile("Best IS excess Sharpe", fmt.num(s.best_is_sharpe_is), "", s.best_is_name + " → OOS " + fmt.num(s.best_is_oos_sharpe)));
     wrap.appendChild(tile("Random controls flagged", fmt.int(s.n_random_controls_strong), s.n_random_controls_strong > 0 ? "down" : "up", "should be 0"));
+    if (s.n_alpha_strong != null) wrap.appendChild(tile("Alpha view: strong", fmt.int(s.n_alpha_strong), s.n_alpha_strong > 0 ? "up" : "",
+      (s.n_alpha_candidate || 0) + " candidates · best " + (s.best_alpha_name || "–") + " t=" + fmt.num(s.best_alpha_t) + " p_fdr=" + fmt.num(s.best_alpha_p_fdr, 3)));
+    if (s.n_trials != null && s.n_trials !== s.n_algorithms) wrap.appendChild(tile("Trials counted", fmt.int(s.n_trials), "", "incl. " + (s.n_trials - s.n_algorithms) + " prior"));
     return wrap;
   }
 
@@ -234,6 +238,12 @@
       { key: "dsr", label: "DSR", num: true, fmt: (v) => fmt.pct(v, 0) },
       { key: "stability", label: "Stability", num: true, fmt: (v) => fmt.pct(v, 0) },
       { key: "edge", label: "Edge" },
+      { key: "alpha_ann", label: "Alpha/yr", num: true, fmt: (v) => fmt.pct(v, 1), signed: true },
+      { key: "alpha_oos_ann", label: "Alpha OOS", num: true, fmt: (v) => fmt.pct(v, 1), signed: true },
+      { key: "beta", label: "Beta", num: true, fmt: (v) => fmt.num(v) },
+      { key: "alpha_t", label: "Alpha t", num: true, fmt: (v) => fmt.num(v) },
+      { key: "p_alpha_fdr", label: "p FDR (alpha)", num: true, fmt: (v) => fmt.num(v, 3) },
+      { key: "alpha_edge", label: "Alpha edge" },
     ];
     let sortKey = "excess_sharpe_is", sortDir = -1;
     const wrap = el("div", { class: "table-wrap" });
@@ -251,7 +261,7 @@
       const view = rows.filter((r) => (!fam || r.family === fam) && (!edge || r.edge === edge));
       view.sort((a, b) => {
         let va = a[sortKey], vb = b[sortKey];
-        if (sortKey === "edge") { va = EDGE_ORDER[va]; vb = EDGE_ORDER[vb]; }
+        if (sortKey === "edge" || sortKey === "alpha_edge") { va = EDGE_ORDER[va]; vb = EDGE_ORDER[vb]; }
         if (va == null) return 1; if (vb == null) return -1;
         return (va < vb ? -1 : va > vb ? 1 : 0) * sortDir;
       });
@@ -261,7 +271,7 @@
         cols.forEach((col) => {
           const raw = col.get ? col.get(r) : r[col.key];
           const text = col.fmt ? col.fmt(raw) : (raw == null ? "–" : String(raw));
-          const cls = [col.num ? "num" : "", col.signed ? (raw > 0 ? "pos" : raw < 0 ? "neg" : "") : "", col.key === "edge" ? "edge-" + raw : ""].join(" ").trim();
+          const cls = [col.num ? "num" : "", col.signed ? (raw > 0 ? "pos" : raw < 0 ? "neg" : "") : "", (col.key === "edge" || col.key === "alpha_edge") ? "edge-" + raw : ""].join(" ").trim();
           tr.appendChild(el("td", { class: cls, text }));
         });
         if (opts && opts.onSelect) tr.addEventListener("click", () => opts.onSelect(r));

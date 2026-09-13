@@ -92,8 +92,10 @@
         <h2>Test the whole library</h2>
         <p class="muted" style="font-size:12px;margin:0 0 6px">Runs every selected algorithm on the same data with fixed parameters, then applies multiple-testing corrections so the best result is judged against the number of trials.</p>
         <form id="batch-form">
-          <label for="b_tickers">Universe (tickers)</label>
-          <input id="b_tickers" name="tickers" value="AAPL MSFT NVDA AMZN GOOGL META JPM XOM JNJ PG" required>
+          <label for="b_universe">Named universe (adds macro series, dividends, sectors)</label>
+          <select id="b_universe" name="universe"><option value="">— custom tickers below —</option></select>
+          <label for="b_tickers">Tickers (used when no named universe is chosen)</label>
+          <input id="b_tickers" name="tickers" value="AAPL MSFT NVDA AMZN GOOGL META JPM XOM JNJ PG">
           <div class="row">
             <div><label for="b_start">Start</label><input id="b_start" name="start" type="date" value="2015-01-01" required></div>
             <div><label for="b_end">End</label><input id="b_end" name="end" type="date" value="2024-12-31" required></div>
@@ -117,9 +119,17 @@
             <div><label for="b_slippage_bps">Slippage (bps)</label><input id="b_slippage_bps" name="slippage_bps" type="number" step="any" value="5"></div>
           </div>
           <div class="row">
-            <div><label for="b_execution_lag">Execution lag (bars)</label><input id="b_execution_lag" name="execution_lag" type="number" min="0" value="1"></div>
+            <div><label for="b_sizing">Sizing</label>
+              <select id="b_sizing" name="sizing"><option value="active">active (fully invested)</option><option value="fixed">fixed (1/n tickers)</option></select></div>
+            <div><label for="b_rebalance_band">Rebalance band</label><input id="b_rebalance_band" name="rebalance_band" type="number" step="0.05" min="0" value="0.25"></div>
+          </div>
+          <div class="row">
+            <div><label for="b_prior_trials">Prior trials (added to N)</label><input id="b_prior_trials" name="prior_trials" type="number" min="0" value="0"></div>
+          </div>
+          <div class="row">
             <div><label for="b_data_source">Data source</label>
               <select id="b_data_source" name="data_source"><option value="yfinance">yfinance</option><option value="lseg">LSEG Workspace</option></select></div>
+            <div></div>
           </div>
           <div style="margin-top:14px"><button class="primary" type="submit" id="batch-btn">Run batch</button></div>
           <div class="status" id="batch-status"></div>

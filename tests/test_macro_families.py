@@ -273,3 +273,57 @@ def test_illiquidity_rank_prefers_thinly_traded_name():
     sig = IlliquidityRank(window=60, top_n=1).generate_signals_market(m)
     assert (sig["CCC"].iloc[70:] == 1).all()
     assert (sig["AAA"].iloc[70:] == -1).all()
+
+
+# ── round 6: seasonality, MAX, idiosyncratic vol, volume premium ───────────
+
+from strategies.anomalies import HighVolumePremium, LowIdioVol, LowMaxReturn, SameMonthSeasonality
+
+
+def test_same_month_seasonality_prefers_stock_strong_in_that_month():
+    n = 252 * 4
+    idx = pd.date_range("2018-01-01", periods=n, freq="B", tz="UTC")
+    rng = np.random.default_rng(2)
+    base = rng.normal(0, 0.005, (n, 2))
+    # JAN rallies every January, FLAT does not
+    jan = (idx.month == 1)
+    base[jan, 0] += 0.01
+    close = pd.DataFrame(100 * np.cumprod(1 + base, axis=0), index=idx, columns=["JAN", "FLAT"])
+    sig = SameMonthSeasonality(years=3, top_n=1).generate_signals(close)
+    last_jan = sig[(idx.month == 1) & (idx.year == 2021)]
+    assert (last_jan["JAN"] == 1).mean() > 0.9
+
+
+def test_low_max_return_avoids_lottery_stock():
+    n = 100
+    idx = pd.date_range("2022-01-03", periods=n, freq="B", tz="UTC")
+    rng = np.random.default_rng(3)
+    calm = 100 * np.cumprod(1 + rng.normal(0, 0.003, n))
+    lottery = 100 * np.cumprod(1 + np.where(np.arange(n) % 10 == 0, 0.15, -0.01))
+    sig = LowMaxReturn(window=21, top_n=1).generate_signals(pd.DataFrame({"CALM": calm, "LOTTO": lottery}, index=idx))
+    assert (sig["CALM"].iloc[25:] == 1).all()
+    assert (sig["LOTTO"].iloc[25:] == -1).all()
+
+
+def test_low_idio_vol_prefers_index_like_name():
+    rng = np.random.default_rng(5)
+    n = 400
+    idx = pd.date_range("2021-01-04", periods=n, freq="B", tz="UTC")
+    mkt = rng.normal(0.0003, 0.01, n)
+    m = MarketData.from_close(pd.DataFrame({
+        "TRACKER": 100 * np.cumprod(1 + mkt + rng.normal(0, 0.001, n)),
+        "NOISY": 100 * np.cumprod(1 + mkt + rng.normal(0, 0.02, n)),
+    }, index=idx))
+    m.attach_extra("obx", pd.Series(1000 * np.cumprod(1 + mkt), index=idx))
+    sig = LowIdioVol(window=63, top_n=1).generate_signals_market(m)
+    assert (sig["TRACKER"].iloc[70:] == 1).all()
+
+
+def test_high_volume_premium_enters_on_volume_spike_and_exits_after_hold():
+    m = _market(n=300)
+    m.volume.loc[:, :] = 1000.0
+    m.volume.iloc[120, 0] = 10_000.0
+    sig = HighVolumePremium(window=50, quantile=0.9, hold=10).generate_signals_market(m)
+    assert sig["AAA"].iloc[120] == 1
+    assert sig["AAA"].iloc[130] == -1
+    assert sig["AAA"].iloc[100] == 0

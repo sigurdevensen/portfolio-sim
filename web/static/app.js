@@ -191,8 +191,10 @@
     $("batch-error").textContent = "";
     const f = e.target;
     const fams = Array.from($("b_families").selectedOptions).map((o) => o.value).filter(Boolean);
+    const universe = f.universe.value || null;
     const body = {
-      tickers: tickers(f.tickers.value), start: f.start.value, end: f.end.value,
+      tickers: universe ? [] : tickers(f.tickers.value), universe, start: f.start.value, end: f.end.value,
+      sizing: f.sizing.value, rebalance_band: num(f, "rebalance_band") || 0, prior_trials: parseInt(f.prior_trials.value || "0", 10),
       families: fams.length ? fams : null, limit: f.limit.value ? parseInt(f.limit.value, 10) : null,
       n_jobs: parseInt(f.n_jobs.value || "0", 10), is_fraction: num(f, "is_fraction") || 0.6,
       n_boot: parseInt(f.n_boot.value || "1000", 10), pbo_blocks: parseInt(f.pbo_blocks.value || "16", 10),
@@ -237,8 +239,18 @@
       specs.forEach((s) => sel.appendChild(Object.assign(document.createElement("option"), { value: s.name, textContent: s.name })));
       renderParams();
       const lib = await api("/api/algorithms");
-      $("algo-count").textContent = "— " + lib.count + " algorithms in library";
-      lib.families.forEach((f) => $("b_families").appendChild(Object.assign(document.createElement("option"), { value: f, textContent: f })));
+      Object.entries(lib.universes || {}).forEach(([k, u]) => $("b_universe").appendChild(Object.assign(document.createElement("option"), { value: k, textContent: k + " — " + u.description })));
+      async function refreshFamilies() {
+        const uni = $("b_universe").value;
+        const l = uni ? await api("/api/algorithms?universe=" + encodeURIComponent(uni)) : lib;
+        $("algo-count").textContent = "— " + l.count + " algorithms";
+        $("b_families").innerHTML = "";
+        l.families.forEach((f) => $("b_families").appendChild(Object.assign(document.createElement("option"), { value: f, textContent: f })));
+        if (uni && l.universes && l.universes[uni]) { $("b_tickers").value = l.universes[uni].tickers.join(" "); $("b_start").value = l.universes[uni].default_start; }
+        $("b_tickers").disabled = !!uni;
+      }
+      $("b_universe").addEventListener("change", refreshFamilies);
+      await refreshFamilies();
       await Promise.all([loadRuns(), loadBatches()]);
       const hash = location.hash.slice(1);
       let tab = "backtest";

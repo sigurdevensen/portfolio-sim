@@ -139,4 +139,93 @@ class IlliquidityRank(Strategy):
         return state_signals(rank <= self.top_n, valid=amihud.notna())
 
 
-ANOMALY_FAMILIES = [DividendYieldRank, LowBetaRank, LongTermReversal, RelativeVolRegime, SectorMomentum, IlliquidityRank]
+class SameMonthSeasonality(Strategy):
+    """Heston & Sadka (2008): hold the ``top_n`` stocks with the highest average return in the
+    same calendar month over the previous ``years`` years."""
+
+    name = "same_month_seasonality"
+
+    def __init__(self, years: int = 3, top_n: int = 5) -> None:
+        self.years, self.top_n = years, top_n
+
+    def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+        monthly = data.resample("M").last().pct_change(fill_method=None)      # month-end returns
+        # Average of the same calendar month's return in each of the previous `years` years.
+        # NaN-aware: the first year of data has no prior-month return, so use the mean
+        # of whatever prior observations exist (at least one).
+        stacked = np.stack([monthly.shift(12 * k).to_numpy() for k in range(1, self.years + 1)])
+        with np.errstate(invalid="ignore"):
+            score = pd.DataFrame(np.nanmean(stacked, axis=0), index=monthly.index, columns=monthly.columns)
+        # The score for month m uses only earlier years, so it is known at the start of month m.
+        naive_idx = monthly.index.tz_convert(None) if monthly.index.tz is not None else monthly.index
+        score.index = naive_idx.to_period("M")
+        per = (data.index.tz_convert(None) if data.index.tz is not None else data.index).to_period("M")
+        daily = pd.DataFrame(score.reindex(per).to_numpy(), index=data.index, columns=data.columns)
+        rank = daily.rank(axis=1, ascending=False, method="first")
+        return state_signals(rank <= self.top_n, valid=daily.notna())
+
+
+class LowMaxReturn(Strategy):
+    """Lottery / MAX effect (Bali, Cakici & Whitelaw 2011): hold the ``top_n`` stocks with the
+    lowest maximum daily return over the past ``window`` days."""
+
+    name = "low_max_return"
+
+    def __init__(self, window: int = 21, top_n: int = 8) -> None:
+        self.window, self.top_n = window, top_n
+
+    def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+        mx = data.pct_change(fill_method=None).rolling(self.window, min_periods=self.window).max()
+        rank = mx.rank(axis=1, ascending=True, method="first")     # 1 = smallest max return
+        return state_signals(rank <= self.top_n, valid=mx.notna())
+
+
+class LowIdioVol(Strategy):
+    """Ang, Hodrick, Xing & Zhang (2006): hold the ``top_n`` stocks with the lowest idiosyncratic
+    volatility (residual vol after regressing on the index series) over ``window`` days."""
+
+    name = "low_idio_vol"
+
+    def __init__(self, series: str = "obx", window: int = 63, top_n: int = 8) -> None:
+        self.series, self.window, self.top_n = series, window, top_n
+
+    def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+        raise KeyError(f"{self.name} needs MarketData.extra['{self.series}']")
+
+    def generate_signals_market(self, market: MarketData) -> pd.DataFrame:
+        market.require_extra(self.series)
+        idx_ret = market.extra[self.series].astype(float).pct_change()
+        rets = market.close.pct_change(fill_method=None)
+        cov = rets.rolling(self.window, min_periods=self.window).cov(idx_ret)
+        var = idx_ret.rolling(self.window, min_periods=self.window).var()
+        beta = cov.div(var.replace(0, np.nan), axis=0)
+        total_var = rets.rolling(self.window, min_periods=self.window).var()
+        idio = np.sqrt(np.clip(total_var - beta**2 * var.to_numpy()[:, None], 0, None))
+        rank = idio.rank(axis=1, ascending=True, method="first")
+        return state_signals(rank <= self.top_n, valid=idio.notna())
+
+
+class HighVolumePremium(Strategy):
+    """Gervais, Kaniel & Mingelgrin (2001): buy stocks whose volume today is in the top
+    ``quantile`` of their own past ``window`` days; hold ``hold`` days."""
+
+    name = "high_volume_premium"
+    requires = {"close", "volume"}
+
+    def __init__(self, window: int = 50, quantile: float = 0.9, hold: int = 20) -> None:
+        self.window, self.quantile, self.hold = window, quantile, hold
+
+    def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+        return self.generate_signals_market(MarketData.from_close(data))
+
+    def generate_signals_market(self, market: MarketData) -> pd.DataFrame:
+        from ._util import enter_exit_signals
+        vol = market.volume
+        thresh = vol.shift(1).rolling(self.window, min_periods=self.window).quantile(self.quantile)
+        spike = vol > thresh
+        exit_ = spike.shift(self.hold).fillna(False).astype(bool) & ~spike
+        return enter_exit_signals(spike, exit_)
+
+
+ANOMALY_FAMILIES = [DividendYieldRank, LowBetaRank, LongTermReversal, RelativeVolRegime, SectorMomentum, IlliquidityRank,
+                    SameMonthSeasonality, LowMaxReturn, LowIdioVol, HighVolumePremium]

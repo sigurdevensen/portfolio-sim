@@ -40,6 +40,8 @@ DATA_TYPES: dict[str, str] = {
     # documented anomalies
     "low_beta_rank": "macro", "long_term_reversal": "cross_sectional", "relative_vol_regime": "price",
     "sector_momentum": "sector", "illiquidity_rank": "volume",
+    "same_month_seasonality": "calendar", "low_max_return": "price", "low_idio_vol": "macro",
+    "high_volume_premium": "volume",
 }
 
 
@@ -242,6 +244,14 @@ def _build_oslo_library() -> list[AlgoSpec]:
     lib += _variants("sector_momentum", [P(lookback=126, top_k=2, skip=21), P(lookback=252, top_k=2, skip=21),
                                          P(lookback=126, top_k=3, skip=21), P(lookback=63, top_k=2, skip=5)])
     lib += _variants("illiquidity_rank", [P(window=252, top_n=5), P(window=252, top_n=8), P(window=126, top_n=8)])
+
+    # ── round 6: further documented anomalies ─────────────────────────────────────
+    lib += _variants("same_month_seasonality", [P(years=3, top_n=5), P(years=5, top_n=5), P(years=3, top_n=8)])
+    lib += _variants("low_max_return", [P(window=21, top_n=8), P(window=21, top_n=5), P(window=63, top_n=8)])
+    lib += _variants("low_idio_vol", [P(series="obx", window=63, top_n=8), P(series="obx", window=126, top_n=5),
+                                      P(series="obx", window=252, top_n=8)])
+    lib += _variants("high_volume_premium", [P(window=50, quantile=0.9, hold=20), P(window=50, quantile=0.95, hold=10),
+                                             P(window=100, quantile=0.9, hold=20)])
 
     names = [a.name for a in lib]
     if len(names) != len(set(names)):
