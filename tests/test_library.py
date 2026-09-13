@@ -104,6 +104,8 @@ def test_library_for_oslo_is_base_plus_additions():
     assert len(lib) == len(ALGORITHMS) + len(OSLO_ALGORITHMS)
     assert library_for(None) == ALGORITHMS
     assert library_for("us10") == ALGORITHMS + OSLO_ALGORITHMS  # macro ideas apply to any universe with extras
+    assert library_for("oslo_holdout") == ALGORITHMS + OSLO_ALGORITHMS
+    assert any(a.family == "illiquidity_rank" for a in filter_algorithms(families=["illiquidity_rank"], universe="oslo_holdout"))
 
 
 def _market_with_extras(n: int = 320, tickers=("AAA", "BBB", "CCC", "DDD"), seed: int = 8) -> MarketData:

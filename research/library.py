@@ -264,14 +264,15 @@ ALGORITHMS: list[AlgoSpec] = _build_library()
 OSLO_ALGORITHMS: list[AlgoSpec] = _build_oslo_library()
 BY_NAME: dict[str, AlgoSpec] = {a.name: a for a in ALGORITHMS + OSLO_ALGORITHMS}
 
-UNIVERSE_ADDITIONS: dict[str, list[AlgoSpec]] = {"oslo": OSLO_ALGORITHMS, "us10": OSLO_ALGORITHMS}
-
-
 def library_for(universe: str | None) -> list[AlgoSpec]:
-    """Base library plus the additions that a universe's external data makes possible."""
+    """Base library plus the universe-specific additions.
+
+    Every named universe carries external series, so the additions apply to all of
+    them; ``None`` (explicit tickers, closes only) gets the base library.
+    """
     if universe is None:
         return list(ALGORITHMS)
-    return list(ALGORITHMS) + list(UNIVERSE_ADDITIONS.get(universe, []))
+    return list(ALGORITHMS) + list(OSLO_ALGORITHMS)
 
 
 def build_algorithm(spec: AlgoSpec) -> Strategy:
