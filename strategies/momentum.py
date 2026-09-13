@@ -19,6 +19,15 @@ class Momentum(Strategy):
         signals = pd.DataFrame(0, index=data.index, columns=data.columns)
         for date in data.index[self.lookback:]:
             row = trailing_returns.loc[date].dropna()
-            top = row.nlargest(self.top_n).index
+            # Only consider assets with positive trailing return as candidates.
+            # This makes single-ticker usage behave as time-series momentum:
+            # long when momentum is positive, exit when it turns negative.
+            positive = row[row > 0]
+            top = positive.nlargest(self.top_n).index
             signals.loc[date, top] = 1
+            # Emit -1 for all other assets so the engine exits any held positions
+            # when an asset drops out of the top-N or turns negative.
+            for ticker in row.index:
+                if ticker not in top:
+                    signals.loc[date, ticker] = -1
         return signals

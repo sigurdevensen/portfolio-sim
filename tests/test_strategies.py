@@ -35,7 +35,7 @@ def test_equal_weight_shape():
 def test_momentum_signals_binary():
     prices = _price_df()
     signals = Momentum(lookback=60, top_n=2).generate_signals(prices)
-    assert set(signals.values.flatten()).issubset({0, 1})
+    assert set(signals.values.flatten()).issubset({-1, 0, 1})
 
 
 def test_mean_reversion_signals_ternary():
