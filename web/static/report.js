@@ -497,6 +497,9 @@
     sections.push(renderFills(data));
     sections.push(renderRecovery(data));
     sections.forEach((s) => s && container.appendChild(s));
+    // Charts were drawn before their cards joined the document, so Plotly sized
+    // them against a detached element. Resize now that real widths exist.
+    container.querySelectorAll(".js-plotly-plot").forEach((p) => Plotly.Plots.resize(p));
   }
 
   window.renderReport = renderReport;
