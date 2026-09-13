@@ -176,3 +176,32 @@ def test_benchmark_passed_to_evaluate_adds_beta():
     report = Evaluator().evaluate(result, benchmark=bench, significance=False)
     assert "beta" in report.metrics
     assert report.metrics["beta"] == pytest.approx(1.0, abs=1e-6)
+
+
+def test_report_md_has_trade_statistics_section(tmp_path):
+    report = Evaluator().evaluate(_make_result_with_trades(), significance=False)
+    content = MarkdownReporter().write(report, output_dir=tmp_path).read_text(encoding="utf-8")
+    assert "## Trade Statistics" in content
+    assert "Win Rate" in content
+    assert "Profit Factor" in content
+
+
+def test_report_md_has_significance_section(tmp_path):
+    report = Evaluator().evaluate(_make_result(), n_samples=20)
+    content = MarkdownReporter().write(report, output_dir=tmp_path).read_text(encoding="utf-8")
+    assert "## Statistical Significance" in content
+    assert "Probabilistic Sharpe Ratio" in content
+    assert "95% CI" in content
+
+
+def test_report_md_omits_significance_when_disabled(tmp_path):
+    report = Evaluator().evaluate(_make_result(), significance=False)
+    content = MarkdownReporter().write(report, output_dir=tmp_path).read_text(encoding="utf-8")
+    assert "## Statistical Significance" not in content
+
+
+def test_report_md_extended_metrics(tmp_path):
+    report = Evaluator().evaluate(_make_result(), significance=False)
+    content = MarkdownReporter().write(report, output_dir=tmp_path).read_text(encoding="utf-8")
+    assert "Sortino" in content
+    assert "Calmar" in content
