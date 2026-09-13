@@ -183,3 +183,113 @@ def test_trade_log_has_value_and_cash_after():
     row = result.trades.iloc[0]
     assert row["value"] == pytest.approx(row["quantity"] * row["fill_price"])
     assert row["cash_after"] == pytest.approx(10_000.0 - row["value"] - row["commission"])
+
+
+# ── Stops and market-aware strategies ──────────────────────────────────────
+
+from data.market import MarketData
+
+
+def _path_prices(path: list[float], ticker: str = "AAA") -> pd.DataFrame:
+    idx = pd.date_range("2023-01-02", periods=len(path), freq="B", tz="UTC")
+    return pd.DataFrame({ticker: path}, index=idx)
+
+
+def _cfg0() -> BacktestConfig:
+    cfg = _config()
+    cfg.execution_lag = 0
+    return cfg
+
+
+class BuyOnceStrategy(Strategy):
+    """Long from bar 0 onward (signal stays 1)."""
+
+    name = "buy_once"
+
+    def __init__(self, stop_loss=None, take_profit=None, trailing_stop=None) -> None:
+        self.stop_loss = stop_loss
+        self.take_profit = take_profit
+        self.trailing_stop = trailing_stop
+
+    def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+        return pd.DataFrame(1, index=data.index, columns=data.columns)
+
+
+def test_stop_loss_exits_at_first_breach_with_reason():
+    prices = _path_prices([100, 98, 95, 89, 85, 90])
+    result = BacktestEngine(_cfg0()).run(BuyOnceStrategy(stop_loss=0.10), prices)
+    sells = result.trades[result.trades["direction"] == -1]
+    assert len(sells) == 1
+    assert sells["date"].iloc[0] == prices.index[3]      # 89 < 90 = 100 * 0.9
+    assert sells["reason"].iloc[0] == "stop_loss"
+    assert result.trades["reason"].iloc[0] == "signal"
+
+
+def test_no_reentry_while_signal_stays_long_after_stop():
+    prices = _path_prices([100, 89, 95, 100, 105])
+    result = BacktestEngine(_cfg0()).run(BuyOnceStrategy(stop_loss=0.10), prices)
+    buys = result.trades[result.trades["direction"] == 1]
+    assert len(buys) == 1
+
+
+def test_take_profit_exits_with_reason():
+    prices = _path_prices([100, 105, 112, 120])
+    result = BacktestEngine(_cfg0()).run(BuyOnceStrategy(take_profit=0.10), prices)
+    sells = result.trades[result.trades["direction"] == -1]
+    assert len(sells) == 1
+    assert sells["date"].iloc[0] == prices.index[2]
+    assert sells["reason"].iloc[0] == "take_profit"
+
+
+def test_trailing_stop_tracks_peak():
+    prices = _path_prices([100, 110, 120, 115, 107, 100])
+    result = BacktestEngine(_cfg0()).run(BuyOnceStrategy(trailing_stop=0.10), prices)
+    sells = result.trades[result.trades["direction"] == -1]
+    assert len(sells) == 1
+    assert sells["date"].iloc[0] == prices.index[4]      # 107 < 108 = 120 * 0.9
+    assert sells["reason"].iloc[0] == "trailing_stop"
+
+
+def test_no_stop_without_attributes():
+    prices = _path_prices([100, 50, 25])
+    result = BacktestEngine(_cfg0()).run(BuyOnceStrategy(), prices)
+    assert (result.trades["direction"] == 1).all()
+
+
+def test_rebalance_trade_has_rebalance_reason():
+    cfg = _cfg0()
+    result = BacktestEngine(cfg).run(PulseStrategy(), _rebalance_prices())
+    reasons = set(result.trades["reason"])
+    assert "rebalance" in reasons
+
+
+class VolumeStrategy(Strategy):
+    """Long a ticker only on bars where volume exceeds 1000 — needs MarketData."""
+
+    name = "volume_test"
+    requires = {"close", "volume"}
+
+    def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+        return pd.DataFrame(0, index=data.index, columns=data.columns)
+
+    def generate_signals_market(self, market: MarketData) -> pd.DataFrame:
+        sig = pd.DataFrame(-1, index=market.close.index, columns=market.close.columns)
+        sig[market.volume > 1000] = 1
+        return sig
+
+
+def test_market_aware_strategy_receives_volume():
+    close = _path_prices([100] * 6)
+    market = MarketData.from_close(close)
+    market.volume.iloc[2] = 5000.0
+    result = BacktestEngine(_cfg0()).run(VolumeStrategy(), close, market=market)
+    buys = result.trades[result.trades["direction"] == 1]
+    assert len(buys) == 1
+    assert buys["date"].iloc[0] == close.index[2]
+
+
+def test_default_market_dispatch_uses_close():
+    close = _path_prices([100] * 4)
+    market = MarketData.from_close(close)
+    result = BacktestEngine(_cfg0()).run(AlwaysBuyStrategy(), close, market=market)
+    assert len(result.trades) == 1

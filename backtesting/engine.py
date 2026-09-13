@@ -13,10 +13,11 @@ from execution.fill import FillSimulator
 from execution.order import Order
 
 if TYPE_CHECKING:
+    from data.market import MarketData
     from strategies.base import Strategy
 
 TRADE_COLUMNS = [
-    "date", "ticker", "direction", "quantity", "fill_price", "commission", "value", "cash_after",
+    "date", "ticker", "direction", "quantity", "fill_price", "commission", "value", "cash_after", "reason",
 ]
 
 
@@ -48,6 +49,10 @@ class BacktestEngine:
       if already held and ``rebalance`` is on, resize to the target weight.
     * ``-1`` when previously not ``-1``: close the position.
     * ``0`` or an unchanged signal: do nothing.
+
+    Stops (``strategy.stop_loss`` / ``take_profit`` / ``trailing_stop``) are
+    evaluated on each bar close before signals and exit the whole position. After a
+    stop the position is not re-opened until the signal leaves ``1`` and returns.
     """
 
     def __init__(self, config: BacktestConfig) -> None:
@@ -58,16 +63,16 @@ class BacktestEngine:
         strategy: "Strategy",
         prices: pd.DataFrame,
         benchmark: pd.Series | None = None,
+        market: "MarketData | None" = None,
     ) -> BacktestResult:
         """Execute backtest and return a result object.
 
         Args:
-            strategy: A Strategy instance with generate_signals().
+            strategy: A Strategy instance.
             prices: DataFrame with UTC DatetimeIndex, one column per ticker (adjusted close).
             benchmark: Optional benchmark price series for alpha/beta.
-
-        Returns:
-            BacktestResult with NAV series, trades DataFrame, and computed metrics.
+            market: Optional OHLCV bundle; when given, signals come from
+                ``strategy.generate_signals_market(market)``.
         """
         start = pd.Timestamp(self.config.start, tz="UTC")
         end = pd.Timestamp(self.config.end, tz="UTC")
@@ -76,7 +81,11 @@ class BacktestEngine:
         if prices_in_range.empty:
             raise ValueError(f"No price data between {self.config.start} and {self.config.end}")
 
-        signals = self._prepare_signals(strategy.generate_signals(prices_in_range), prices_in_range)
+        if market is not None:
+            raw_signals = strategy.generate_signals_market(market.slice(start, end))
+        else:
+            raw_signals = strategy.generate_signals(prices_in_range)
+        signals = self._prepare_signals(raw_signals, prices_in_range)
 
         portfolio = Portfolio(self.config.initial_capital)
         fill_sim = FillSimulator(slippage=self.config.slippage, commission_rate=self.config.commission)
@@ -86,7 +95,13 @@ class BacktestEngine:
         if self.config.max_weight is not None:
             weight = min(weight, self.config.max_weight)
 
+        stop_loss = getattr(strategy, "stop_loss", None)
+        take_profit = getattr(strategy, "take_profit", None)
+        trailing_stop = getattr(strategy, "trailing_stop", None)
+        has_stops = any(v is not None for v in (stop_loss, take_profit, trailing_stop))
+
         prior: dict[str, int] = {t: 0 for t in tickers}
+        peak: dict[str, float] = {}
         fills_log: list[dict] = []
 
         for date in prices_in_range.index:
@@ -96,6 +111,24 @@ class BacktestEngine:
             }
             if not valid_prices:
                 continue
+
+            # ── stops, evaluated on this bar's close ──────────────────────
+            if has_stops:
+                for ticker, pos in list(portfolio.positions.items()):
+                    if ticker not in valid_prices:
+                        continue
+                    price = valid_prices[ticker]
+                    peak[ticker] = max(peak.get(ticker, pos.avg_cost), price)
+                    reason = None
+                    if stop_loss is not None and price <= pos.avg_cost * (1 - stop_loss):
+                        reason = "stop_loss"
+                    elif take_profit is not None and price >= pos.avg_cost * (1 + take_profit):
+                        reason = "take_profit"
+                    elif trailing_stop is not None and price <= peak[ticker] * (1 - trailing_stop):
+                        reason = "trailing_stop"
+                    if reason:
+                        self._sell(portfolio, fill_sim, fills_log, ticker, pos.shares, price, date, reason)
+                        peak.pop(ticker, None)
 
             nav = portfolio.market_value(valid_prices)
             current = signals.loc[date]
@@ -115,16 +148,18 @@ class BacktestEngine:
                     target_shares = self._target_shares(nav * weight, price, fill_sim)
                     if held is None:
                         if target_shares > 0:
-                            self._buy(portfolio, fill_sim, fills_log, ticker, target_shares, price, date)
+                            self._buy(portfolio, fill_sim, fills_log, ticker, target_shares, price, date, "signal")
+                            peak[ticker] = price
                     elif self.config.rebalance:
                         delta = target_shares - held.shares
                         if delta > 0:
-                            self._buy(portfolio, fill_sim, fills_log, ticker, delta, price, date)
+                            self._buy(portfolio, fill_sim, fills_log, ticker, delta, price, date, "rebalance")
                         elif delta < 0:
-                            self._sell(portfolio, fill_sim, fills_log, ticker, -delta, price, date)
+                            self._sell(portfolio, fill_sim, fills_log, ticker, -delta, price, date, "rebalance")
 
                 elif sig == -1 and held is not None:
-                    self._sell(portfolio, fill_sim, fills_log, ticker, held.shares, price, date)
+                    self._sell(portfolio, fill_sim, fills_log, ticker, held.shares, price, date, "signal")
+                    peak.pop(ticker, None)
 
             portfolio.record_nav(date, valid_prices)
             prior = {t: int(current[t]) for t in tickers}
@@ -154,7 +189,7 @@ class BacktestEngine:
         return float(math.floor(target_value / cost_per_share))
 
     @staticmethod
-    def _buy(portfolio, fill_sim, log, ticker, shares, price, date) -> None:
+    def _buy(portfolio, fill_sim, log, ticker, shares, price, date, reason) -> None:
         if shares <= 0:
             return
         fill = fill_sim.execute(Order(ticker=ticker, direction=1, quantity=float(shares), timestamp=date), price)
@@ -166,18 +201,18 @@ class BacktestEngine:
                 return
             fill = fill_sim.execute(Order(ticker=ticker, direction=1, quantity=float(affordable), timestamp=date), price)
         portfolio.buy(ticker, fill.order.quantity, fill.fill_price, fill.commission_rate)
-        BacktestEngine._log(log, portfolio, fill, date, 1)
+        BacktestEngine._log(log, portfolio, fill, date, 1, reason)
 
     @staticmethod
-    def _sell(portfolio, fill_sim, log, ticker, shares, price, date) -> None:
+    def _sell(portfolio, fill_sim, log, ticker, shares, price, date, reason) -> None:
         if shares <= 0:
             return
         fill = fill_sim.execute(Order(ticker=ticker, direction=-1, quantity=float(shares), timestamp=date), price)
         portfolio.sell(ticker, fill.order.quantity, fill.fill_price, fill.commission_rate)
-        BacktestEngine._log(log, portfolio, fill, date, -1)
+        BacktestEngine._log(log, portfolio, fill, date, -1, reason)
 
     @staticmethod
-    def _log(log: list[dict], portfolio: Portfolio, fill, date: pd.Timestamp, direction: int) -> None:
+    def _log(log: list[dict], portfolio: Portfolio, fill, date: pd.Timestamp, direction: int, reason: str) -> None:
         value = fill.order.quantity * fill.fill_price
         log.append({
             "date": date,
@@ -188,4 +223,5 @@ class BacktestEngine:
             "commission": value * fill.commission_rate,
             "value": value,
             "cash_after": portfolio.cash,
+            "reason": reason,
         })
