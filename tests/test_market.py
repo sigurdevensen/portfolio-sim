@@ -169,3 +169,15 @@ def test_fetch_dividends_aligned_to_index(mock_tk, tmp_path):
     assert div.loc["2024-01-03", "AAA"] == 1.0
     assert div.loc["2024-01-10", "BBB"] == 2.0
     assert div.to_numpy().sum() == 6.0
+
+
+from data.market import cache_key
+
+
+def test_cache_key_short_is_readable_and_long_is_hashed():
+    short = cache_key("ohlcv", "AAA_BBB", "2020-01-01", "2020-12-31")
+    assert short == "ohlcv_AAA_BBB_2020-01-01_2020-12-31"
+    long = cache_key("ohlcv", "_".join(f"T{i}.OL" for i in range(40)), "2010-01-01", "2024-12-31")
+    assert len(long) < 120
+    assert long != cache_key("ohlcv", "_".join(f"T{i}.OL" for i in range(41)), "2010-01-01", "2024-12-31")
+    assert "^" not in cache_key("external", "^VIX", "a", "b")

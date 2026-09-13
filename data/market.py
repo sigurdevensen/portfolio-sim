@@ -15,6 +15,18 @@ import pandas as pd
 import yfinance as yf
 
 FIELDS = ("open", "high", "low", "close", "volume")
+_MAX_KEY_LEN = 80
+
+
+def cache_key(prefix: str, *parts: str) -> str:
+    """Filesystem-safe cache file stem; long keys are hashed to dodge Windows path limits."""
+    import hashlib
+    raw = "_".join(str(x) for x in parts)
+    raw = raw.replace("/", "-").replace("\\", "-").replace(":", "-").replace("^", "").replace("=", "")
+    if len(raw) > _MAX_KEY_LEN:
+        digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+        raw = raw[:40] + "_" + digest
+    return f"{prefix}_{raw}"
 _YF_FIELDS = {"open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume"}
 CACHE_DIR = Path(__file__).parent / "cache"
 
@@ -117,7 +129,7 @@ def fetch_market_data(
     """
     cache_dir = Path(cache_dir) if cache_dir else CACHE_DIR
     cache_dir.mkdir(parents=True, exist_ok=True)
-    key = "ohlcv_" + "_".join(sorted(tickers)) + f"_{start}_{end}"
+    key = cache_key("ohlcv", "_".join(sorted(tickers)), start, end)
     cache_path = cache_dir / f"{key}.parquet"
 
     if use_cache and cache_path.exists():
@@ -175,7 +187,7 @@ def fetch_external(
     cache_dir = Path(cache_dir) if cache_dir else CACHE_DIR
     cache_dir.mkdir(parents=True, exist_ok=True)
     names = list(symbols)
-    key = "external_" + "_".join(sorted(names)) + f"_{start}_{end}"
+    key = cache_key("external", "_".join(sorted(names)), start, end)
     cache_path = cache_dir / f"{key}.parquet"
     if use_cache and cache_path.exists():
         return pd.read_parquet(cache_path)
@@ -209,7 +221,7 @@ def fetch_dividends(
     """
     cache_dir = Path(cache_dir) if cache_dir else CACHE_DIR
     cache_dir.mkdir(parents=True, exist_ok=True)
-    key = "dividends_" + "_".join(sorted(tickers)) + f"_{str(index[0].date())}_{str(index[-1].date())}"
+    key = cache_key("dividends", "_".join(sorted(tickers)), str(index[0].date()), str(index[-1].date()))
     cache_path = cache_dir / f"{key}.parquet"
     if use_cache and cache_path.exists():
         cached = pd.read_parquet(cache_path)
