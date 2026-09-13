@@ -10,6 +10,18 @@ from .cross_sectional import (
     TimeSeriesMomentum,
 )
 from .equal_weight import EqualWeight
+from .events import EVENT_FAMILIES, DividendCapture, PostDividendReversal, WeeklyReversal
+from .macro import (
+    MACRO_FAMILIES,
+    CrossAssetAgreement,
+    IndexDipBuy,
+    MacroBetaRotation,
+    MacroLevelRegime,
+    MacroTrendFilter,
+    RelativeToIndex,
+    USLeadLag,
+    VIXSpikeReversal,
+)
 from .mean_reversion import MeanReversion
 from .momentum import Momentum
 from .random_control import RANDOM_FAMILIES, RandomSignal
@@ -36,7 +48,7 @@ from .volume import VOLUME_FAMILIES, OBVTrend, VolumeBreakout, VolumeZReversal
 ALL_FAMILIES: list[type[Strategy]] = [
     BuyAndHold, EqualWeight, Momentum, MeanReversion,
     *TECHNICAL_FAMILIES, *VOLUME_FAMILIES, *CROSS_SECTIONAL_FAMILIES,
-    *CALENDAR_FAMILIES, *REGIME_FAMILIES, *RANDOM_FAMILIES,
+    *CALENDAR_FAMILIES, *REGIME_FAMILIES, *MACRO_FAMILIES, *EVENT_FAMILIES, *RANDOM_FAMILIES,
 ]
 
 __all__ = [
@@ -49,5 +61,8 @@ __all__ = [
     "LowVolatility", "DualMomentum", "RelativeStrength", "High52Week", "TimeSeriesMomentum",
     "TurnOfMonth", "DayOfWeek", "SellInMay",
     "VolatilityRegime", "BuyTheDip", "StreakReversal", "GapReversal",
+    "MacroTrendFilter", "MacroLevelRegime", "MacroBetaRotation", "CrossAssetAgreement",
+    "RelativeToIndex", "IndexDipBuy", "VIXSpikeReversal", "USLeadLag",
+    "DividendCapture", "PostDividendReversal", "WeeklyReversal",
     "RandomSignal",
 ]
