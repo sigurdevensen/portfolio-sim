@@ -219,3 +219,7 @@ __marimo__/
 
 # portfolio-sim: cached market data
 data/cache/
+
+# portfolio-sim: generated reports and saved platform runs
+reports/runs/
+reports/smoke*/
