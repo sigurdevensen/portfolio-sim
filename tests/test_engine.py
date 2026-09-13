@@ -94,3 +94,92 @@ def test_empty_date_range_raises():
     engine = BacktestEngine(BacktestConfig(start="2030-01-01", end="2030-12-31"))
     with pytest.raises(ValueError, match="No price data"):
         engine.run(AlwaysBuyStrategy(), prices)
+
+
+# ── Execution lag ──────────────────────────────────────────────────────────
+
+def test_default_execution_lag_fills_on_next_bar():
+    prices = _prices(10)
+    engine = BacktestEngine(_config())  # execution_lag defaults to 1
+    result = engine.run(AlwaysBuyStrategy(), prices)
+    assert result.trades["date"].iloc[0] == prices.index[1]
+
+
+def test_zero_execution_lag_fills_on_signal_bar():
+    prices = _prices(10)
+    cfg = _config()
+    cfg.execution_lag = 0
+    result = BacktestEngine(cfg).run(AlwaysBuyStrategy(), prices)
+    assert result.trades["date"].iloc[0] == prices.index[0]
+
+
+def test_nav_recorded_for_every_bar_even_with_lag():
+    prices = _prices(10)
+    result = BacktestEngine(_config()).run(AlwaysBuyStrategy(), prices)
+    assert len(result.nav) == 10
+
+
+# ── Rebalancing ────────────────────────────────────────────────────────────
+
+class PulseStrategy(Strategy):
+    """Signal 1 on bars 0 and 2, 0 elsewhere — forces a re-entry signal while held."""
+
+    name = "pulse"
+
+    def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+        sig = pd.DataFrame(0, index=data.index, columns=data.columns)
+        sig.iloc[0] = 1
+        sig.iloc[2] = 1
+        return sig
+
+
+def _rebalance_prices() -> pd.DataFrame:
+    idx = pd.date_range("2023-01-02", periods=4, freq="B", tz="UTC")
+    return pd.DataFrame({"AAA": [100.0, 100.0, 200.0, 200.0], "BBB": [100.0] * 4}, index=idx)
+
+
+def test_rebalance_trims_overweight_position():
+    cfg = _config()
+    cfg.execution_lag = 0
+    result = BacktestEngine(cfg).run(PulseStrategy(), _rebalance_prices())
+    sells = result.trades[(result.trades["ticker"] == "AAA") & (result.trades["direction"] == -1)]
+    assert len(sells) == 1
+    # NAV on bar 2 = 50*200 + 50*100 = 15000; target 7500 / 200 = 37 shares -> sell 13
+    assert sells["quantity"].iloc[0] == 13.0
+
+
+def test_rebalance_tops_up_underweight_position():
+    cfg = _config()
+    cfg.execution_lag = 0
+    result = BacktestEngine(cfg).run(PulseStrategy(), _rebalance_prices())
+    buys = result.trades[(result.trades["ticker"] == "BBB") & (result.trades["direction"] == 1)]
+    assert len(buys) == 2
+    assert buys["quantity"].iloc[1] == 25.0  # 7500 / 100 - 50
+
+
+def test_rebalance_disabled_leaves_positions_alone():
+    cfg = _config()
+    cfg.execution_lag = 0
+    cfg.rebalance = False
+    result = BacktestEngine(cfg).run(PulseStrategy(), _rebalance_prices())
+    assert len(result.trades) == 2  # only the two initial buys
+
+
+def test_max_weight_caps_allocation():
+    cfg = _config()
+    cfg.execution_lag = 0
+    cfg.max_weight = 0.25
+    result = BacktestEngine(cfg).run(AlwaysBuyStrategy(), _prices(5, ["AAA"]))
+    # 10_000 * 0.25 / 100 = 25 shares
+    assert result.trades["quantity"].iloc[0] == 25.0
+
+
+# ── Trade log ──────────────────────────────────────────────────────────────
+
+def test_trade_log_has_value_and_cash_after():
+    result = BacktestEngine(_config()).run(AlwaysBuyStrategy(), _prices(5))
+    for col in ("value", "cash_after"):
+        assert col in result.trades.columns
+    row = result.trades.iloc[0]
+    assert row["value"] == pytest.approx(row["quantity"] * row["fill_price"])
+    assert row["cash_after"] == pytest.approx(10_000.0 - row["value"] - row["commission"])

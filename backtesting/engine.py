@@ -15,28 +15,56 @@ from execution.order import Order
 if TYPE_CHECKING:
     from strategies.base import Strategy
 
+TRADE_COLUMNS = [
+    "date", "ticker", "direction", "quantity", "fill_price", "commission", "value", "cash_after",
+]
+
 
 @dataclass
 class BacktestConfig:
     start: str
     end: str
     initial_capital: float = 100_000.0
-    commission: float = 0.001   # fraction, e.g. 0.001 = 0.1%
-    slippage: float = 0.0005    # fraction, e.g. 0.0005 = 5 bps
+    commission: float = 0.001      # fraction, e.g. 0.001 = 0.1%
+    slippage: float = 0.0005       # fraction, e.g. 0.0005 = 5 bps
+    execution_lag: int = 1         # bars between signal and fill (1 = next close)
+    rebalance: bool = True         # resize held positions on a fresh long signal
+    max_weight: float | None = None  # cap on per-ticker target weight
+    risk_free_rate: float = 0.0    # annualised, used for Sharpe/Sortino
+
+    def __post_init__(self) -> None:
+        if self.execution_lag < 0:
+            raise ValueError("execution_lag must be >= 0")
+        if self.max_weight is not None and not (0 < self.max_weight <= 1):
+            raise ValueError("max_weight must be in (0, 1]")
 
 
 class BacktestEngine:
-    """Runs a strategy against historical price data."""
+    """Runs a strategy against historical price data.
+
+    Signal semantics (per ticker, per bar, after applying ``execution_lag``):
+
+    * ``1`` when previously not ``1``: open a position at the target weight, or,
+      if already held and ``rebalance`` is on, resize to the target weight.
+    * ``-1`` when previously not ``-1``: close the position.
+    * ``0`` or an unchanged signal: do nothing.
+    """
 
     def __init__(self, config: BacktestConfig) -> None:
         self.config = config
 
-    def run(self, strategy: "Strategy", prices: pd.DataFrame) -> BacktestResult:
+    def run(
+        self,
+        strategy: "Strategy",
+        prices: pd.DataFrame,
+        benchmark: pd.Series | None = None,
+    ) -> BacktestResult:
         """Execute backtest and return a result object.
 
         Args:
             strategy: A Strategy instance with generate_signals().
             prices: DataFrame with UTC DatetimeIndex, one column per ticker (adjusted close).
+            benchmark: Optional benchmark price series for alpha/beta.
 
         Returns:
             BacktestResult with NAV series, trades DataFrame, and computed metrics.
@@ -48,92 +76,116 @@ class BacktestEngine:
         if prices_in_range.empty:
             raise ValueError(f"No price data between {self.config.start} and {self.config.end}")
 
-        signals_df = strategy.generate_signals(prices_in_range)
+        signals = self._prepare_signals(strategy.generate_signals(prices_in_range), prices_in_range)
 
         portfolio = Portfolio(self.config.initial_capital)
-        fill_sim = FillSimulator(
-            slippage=self.config.slippage,
-            commission_rate=self.config.commission,
-        )
+        fill_sim = FillSimulator(slippage=self.config.slippage, commission_rate=self.config.commission)
 
         tickers = prices_in_range.columns.tolist()
-        n_tickers = len(tickers)
-        prior_signals: dict[str, int] = {t: 0 for t in tickers}
+        weight = 1.0 / len(tickers)
+        if self.config.max_weight is not None:
+            weight = min(weight, self.config.max_weight)
+
+        prior: dict[str, int] = {t: 0 for t in tickers}
         fills_log: list[dict] = []
 
         for date in prices_in_range.index:
-            if date not in signals_df.index:
-                continue
-
-            current_signals = signals_df.loc[date]
             prices_today = prices_in_range.loc[date]
             valid_prices = {
-                t: float(prices_today[t])
-                for t in tickers
-                if not pd.isna(prices_today[t])
+                t: float(prices_today[t]) for t in tickers if not pd.isna(prices_today[t])
             }
-
             if not valid_prices:
                 continue
 
-            nav_start = portfolio.market_value(valid_prices)
+            nav = portfolio.market_value(valid_prices)
+            current = signals.loc[date]
 
             for ticker in tickers:
                 if ticker not in valid_prices:
                     continue
-
-                sig = int(current_signals.get(ticker, 0))
-                prev_sig = prior_signals.get(ticker, 0)
-
-                if sig == prev_sig:
+                sig = int(current[ticker])
+                prev = prior[ticker]
+                if sig == prev:
                     continue
 
                 price = valid_prices[ticker]
+                held = portfolio.positions.get(ticker)
 
-                # No pyramiding: only enter a long if no position currently held
-                if sig == 1 and ticker not in portfolio.positions:
-                    target_alloc = nav_start / n_tickers
-                    # Include slippage and commission in per-share cost so the
-                    # estimated_cost check never silently rejects a valid order.
-                    cost_per_share = price * (1 + fill_sim.slippage) * (1 + fill_sim.commission_rate)
-                    shares = math.floor(target_alloc / cost_per_share)
-                    if shares <= 0:
-                        continue
-                    order = Order(ticker=ticker, direction=1, quantity=float(shares), timestamp=date)
-                    fill = fill_sim.execute(order, price)
-                    estimated_cost = fill.order.quantity * fill.fill_price * (1 + fill.commission_rate)
-                    if estimated_cost <= portfolio.cash:
-                        portfolio.buy(ticker, fill.order.quantity, fill.fill_price, fill.commission_rate)
-                        fills_log.append({
-                            "date": date,
-                            "ticker": ticker,
-                            "direction": 1,
-                            "quantity": fill.order.quantity,
-                            "fill_price": fill.fill_price,
-                            "commission": fill.order.quantity * fill.fill_price * fill.commission_rate,
-                        })
+                if sig == 1:
+                    target_shares = self._target_shares(nav * weight, price, fill_sim)
+                    if held is None:
+                        if target_shares > 0:
+                            self._buy(portfolio, fill_sim, fills_log, ticker, target_shares, price, date)
+                    elif self.config.rebalance:
+                        delta = target_shares - held.shares
+                        if delta > 0:
+                            self._buy(portfolio, fill_sim, fills_log, ticker, delta, price, date)
+                        elif delta < 0:
+                            self._sell(portfolio, fill_sim, fills_log, ticker, -delta, price, date)
 
-                elif sig == -1 and ticker in portfolio.positions:
-                    shares = portfolio.positions[ticker].shares
-                    order = Order(ticker=ticker, direction=-1, quantity=shares, timestamp=date)
-                    fill = fill_sim.execute(order, price)
-                    if portfolio.positions.get(ticker) and portfolio.positions[ticker].shares >= fill.order.quantity:
-                        portfolio.sell(ticker, fill.order.quantity, fill.fill_price, fill.commission_rate)
-                        fills_log.append({
-                            "date": date,
-                            "ticker": ticker,
-                            "direction": -1,
-                            "quantity": fill.order.quantity,
-                            "fill_price": fill.fill_price,
-                            "commission": fill.order.quantity * fill.fill_price * fill.commission_rate,
-                        })
+                elif sig == -1 and held is not None:
+                    self._sell(portfolio, fill_sim, fills_log, ticker, held.shares, price, date)
 
             portfolio.record_nav(date, valid_prices)
-            prior_signals = {t: int(current_signals.get(t, 0)) for t in tickers}
+            prior = {t: int(current[t]) for t in tickers}
 
-        trades_df = (
-            pd.DataFrame(fills_log)
-            if fills_log
-            else pd.DataFrame(columns=["date", "ticker", "direction", "quantity", "fill_price", "commission"])
+        trades_df = pd.DataFrame(fills_log, columns=TRADE_COLUMNS)
+        return BacktestResult(
+            nav=portfolio.nav_series,
+            trades=trades_df,
+            benchmark=benchmark,
+            risk_free_rate=self.config.risk_free_rate,
         )
-        return BacktestResult(nav=portfolio.nav_series, trades=trades_df)
+
+    # ── helpers ────────────────────────────────────────────────────────────
+
+    def _prepare_signals(self, raw: pd.DataFrame, prices: pd.DataFrame) -> pd.DataFrame:
+        """Align signals to the price grid, apply execution lag, coerce to int."""
+        sig = raw.reindex(index=prices.index, columns=prices.columns).fillna(0)
+        if self.config.execution_lag > 0:
+            sig = sig.shift(self.config.execution_lag).fillna(0)
+        return sig.astype(int)
+
+    @staticmethod
+    def _target_shares(target_value: float, price: float, fill_sim: FillSimulator) -> float:
+        # Include slippage and commission in per-share cost so the cash check never
+        # rejects an order that was sized against the raw close.
+        cost_per_share = price * (1 + fill_sim.slippage) * (1 + fill_sim.commission_rate)
+        return float(math.floor(target_value / cost_per_share))
+
+    @staticmethod
+    def _buy(portfolio, fill_sim, log, ticker, shares, price, date) -> None:
+        if shares <= 0:
+            return
+        fill = fill_sim.execute(Order(ticker=ticker, direction=1, quantity=float(shares), timestamp=date), price)
+        cost = fill.order.quantity * fill.fill_price * (1 + fill.commission_rate)
+        if cost > portfolio.cash:
+            # Size down to what cash allows rather than silently skipping.
+            affordable = math.floor(portfolio.cash / (fill.fill_price * (1 + fill.commission_rate)))
+            if affordable <= 0:
+                return
+            fill = fill_sim.execute(Order(ticker=ticker, direction=1, quantity=float(affordable), timestamp=date), price)
+        portfolio.buy(ticker, fill.order.quantity, fill.fill_price, fill.commission_rate)
+        BacktestEngine._log(log, portfolio, fill, date, 1)
+
+    @staticmethod
+    def _sell(portfolio, fill_sim, log, ticker, shares, price, date) -> None:
+        if shares <= 0:
+            return
+        fill = fill_sim.execute(Order(ticker=ticker, direction=-1, quantity=float(shares), timestamp=date), price)
+        portfolio.sell(ticker, fill.order.quantity, fill.fill_price, fill.commission_rate)
+        BacktestEngine._log(log, portfolio, fill, date, -1)
+
+    @staticmethod
+    def _log(log: list[dict], portfolio: Portfolio, fill, date: pd.Timestamp, direction: int) -> None:
+        value = fill.order.quantity * fill.fill_price
+        log.append({
+            "date": date,
+            "ticker": fill.order.ticker,
+            "direction": direction,
+            "quantity": fill.order.quantity,
+            "fill_price": fill.fill_price,
+            "commission": value * fill.commission_rate,
+            "value": value,
+            "cash_after": portfolio.cash,
+        })
