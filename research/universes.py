@@ -57,6 +57,26 @@ UNIVERSES: dict[str, dict[str, Any]] = {
         "sectors": OSLO_SECTORS,
         "default_start": "2010-01-01",
     },
+    "oslo_holdout": {
+        "description": "Replication universe fixed AFTER the search on 'oslo' and BEFORE any test on it: "
+                       "OSEAX all-share members (LSEG chain, 2026-09-13) that were not in 'oslo', with "
+                       "yfinance history from before mid-2016 and >= 2000 trading days. Used only to "
+                       "confirm or refute pre-registered hypotheses.",
+        "tickers": [
+            "ACR.OL", "AFK.OL", "AKAST.OL", "AKER.OL", "AKVA.OL", "AZT.OL", "BNOR.OL", "BOR.OL", "BOUV.OL",
+            "BWO.OL", "CONTX.OL", "DNO.OL", "EIOF.OL", "ENH.OL", "GOD.OL", "GYL.OL", "HAVI.OL", "HEX.OL",
+            "IOX.OL", "ITERA.OL", "KOA.OL", "MEDI.OL", "MGN.OL", "NAVA.OL", "NEL.OL", "NKR.OL", "NOM.OL",
+            "NRC.OL", "ODF.OL", "ODFB.OL", "OTEC.OL", "PHO.OL", "POL.OL", "PSE.OL", "QEC.OL", "REACH.OL",
+            "SB1NO.OL", "SCANA.OL", "SNI.OL", "SOFF.OL", "STRO.OL", "TECH.OL", "VOIM.OL", "VVL.OL", "WWI.OL",
+            "WWIB.OL", "ENSU.OL", "ENDUR.OL", "IDEX.OL", "BINT.OL", "SDSD.OL", "HBC.OL", "NAPA.OL", "VOW.OL",
+            "ZAL.OL", "NEXT.OL", "EQVA.OL", "TRMED.OL", "MULTI.OL", "VEND.OL", "VISTN.OL", "EPR.OL", "KID.OL",
+            "PARB.OL", "B2I.OL",
+        ],
+        "extra": {k: MACRO_SYMBOLS[k] for k in ("brent", "usdnok", "vix", "spx", "obx")},
+        "dividends": False,
+        "default_start": "2010-01-01",
+        "min_adv_nok": 200_000.0,   # a priori: exclude names too thin to trade at all
+    },
     "us10": {
         "description": "10 US mega-caps.",
         "tickers": ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "JPM", "XOM", "JNJ", "PG"],
@@ -83,9 +103,16 @@ def load_universe(
     start = start or spec["default_start"]
     market = fetch_market_data(spec["tickers"], start, end, use_cache=use_cache)
 
-    # Drop tickers with too little history; keep the survivors' order.
+    # Drop tickers with too little history or corrupt data; keep the survivors' order.
     counts = market.close.notna().sum()
-    keep = [t for t in market.tickers if counts.get(t, 0) >= min_history_days]
+    bad_price = (market.close <= 0).any()
+    adv = (market.close * market.volume).mean()
+    min_adv = float(spec.get("min_adv_nok", 0.0))
+    keep = [
+        t for t in market.tickers
+        if counts.get(t, 0) >= min_history_days and not bool(bad_price.get(t, False))
+        and (min_adv <= 0 or (pd.notna(adv.get(t)) and adv.get(t) >= min_adv))
+    ]
     dropped = [t for t in market.tickers if t not in keep]
     if keep != market.tickers:
         market = MarketData(

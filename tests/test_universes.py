@@ -57,3 +57,29 @@ def test_oslo_sector_map_covers_universe():
     missing = [t for t in universe_tickers("oslo") if t not in OSLO_SECTORS]
     assert missing == []
     assert len(set(OSLO_SECTORS.values())) >= 8
+
+
+def test_holdout_universe_is_disjoint_from_oslo():
+    oslo = set(universe_tickers("oslo"))
+    hold = universe_tickers("oslo_holdout")
+    assert len(hold) >= 60
+    assert not (set(hold) & oslo)
+
+
+def _fake_market_with_bad(tickers, start, end, use_cache=True, cache_dir=None):
+    idx = pd.date_range("2018-01-01", periods=600, freq="B", tz="UTC")
+    close = pd.DataFrame({t: 100.0 for t in tickers}, index=idx)
+    close[tickers[0]] = -5.0                     # corrupt prices
+    m = MarketData.from_close(close)
+    m.volume.loc[:, :] = 10_000.0
+    m.volume[tickers[1]] = 0.0                   # untradeable: zero traded value
+    return m
+
+
+@patch("research.universes.fetch_external", side_effect=_fake_external)
+@patch("research.universes.fetch_market_data", side_effect=_fake_market_with_bad)
+def test_load_universe_drops_corrupt_and_untradeable_names(m1, m2):
+    m = load_universe("oslo_holdout", "2018-01-01", "2020-06-30")
+    hold = universe_tickers("oslo_holdout")
+    assert hold[0] in m.meta["dropped"] and hold[1] in m.meta["dropped"]
+    assert hold[2] in m.tickers
