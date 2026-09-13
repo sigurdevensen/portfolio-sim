@@ -27,8 +27,9 @@ from data.market import MarketData, fetch_market_data
 from evaluation.html_reporter import BatchHTMLReporter, HTMLReporter
 from pipeline.pipeline import Pipeline
 from research.batch import BatchConfig, run_batch
-from research.library import ALGORITHMS, families, filter_algorithms
+from research.library import ALGORITHMS, families, filter_algorithms, library_for
 from research.report import BatchStore, batch_to_dict
+from research.universes import UNIVERSES, load_universe
 from web.registry import build, strategy_specs
 from web.store import RunStore
 
@@ -58,7 +59,8 @@ class BacktestRequest(BaseModel):
 
 
 class BatchRequest(BaseModel):
-    tickers: list[str] = Field(min_length=1)
+    tickers: list[str] = Field(default_factory=list)
+    universe: str | None = None
     start: str
     end: str
     families: list[str] | None = None
@@ -158,12 +160,15 @@ def create_app(store: RunStore | None = None, batch_store: BatchStore | None = N
     # ── algorithm lab ─────────────────────────────────────────────────────
 
     @app.get("/api/algorithms")
-    def algorithms() -> dict[str, Any]:
+    def algorithms(universe: str | None = None) -> dict[str, Any]:
+        lib = library_for(universe) if universe in UNIVERSES else list(ALGORITHMS)
         return {
-            "count": len(ALGORITHMS),
-            "families": families(),
-            "data_types": sorted({a.data_type for a in ALGORITHMS}),
-            "algorithms": [a.to_dict() for a in ALGORITHMS],
+            "count": len(lib),
+            "families": sorted({a.family for a in lib}),
+            "data_types": sorted({a.data_type for a in lib}),
+            "algorithms": [a.to_dict() for a in lib],
+            "universes": {k: {"description": v["description"], "tickers": v["tickers"],
+                              "default_start": v["default_start"]} for k, v in UNIVERSES.items()},
         }
 
     @app.get("/api/batches")
@@ -191,20 +196,30 @@ def create_app(store: RunStore | None = None, batch_store: BatchStore | None = N
 
     @app.post("/api/batch")
     def batch(req: BatchRequest) -> dict[str, Any]:
-        known = set(families())
+        universe = req.universe or None
+        if universe is not None and universe not in UNIVERSES:
+            raise HTTPException(400, f"Unknown universe '{universe}'. Available: {sorted(UNIVERSES)}")
+        known = {a.family for a in library_for(universe)}
         if req.families:
             unknown = sorted(set(req.families) - known)
             if unknown:
                 raise HTTPException(400, f"Unknown families: {unknown}. Available: {sorted(known)}")
-        specs = filter_algorithms(families=req.families, data_types=req.data_types, names=req.names, limit=req.limit)
+        specs = filter_algorithms(families=req.families, data_types=req.data_types, names=req.names,
+                                  limit=req.limit, universe=universe)
         if not specs:
             raise HTTPException(400, "No algorithms match the requested filter")
         if req.pbo_blocks % 2:
             raise HTTPException(400, "pbo_blocks must be even")
 
         tickers = [t.strip() for t in req.tickers if t.strip()]
+        if not tickers and universe is None:
+            raise HTTPException(400, "Provide tickers or a universe")
         try:
-            market = _load_market(tickers, req.start, req.end, req.data_source)
+            if universe is not None:
+                market = load_universe(universe, start=req.start, end=req.end)
+                tickers = market.tickers
+            else:
+                market = _load_market(tickers, req.start, req.end, req.data_source)
         except RuntimeError as exc:
             raise HTTPException(502, str(exc))
         except (ValueError, KeyError) as exc:
@@ -221,7 +236,8 @@ def create_app(store: RunStore | None = None, batch_store: BatchStore | None = N
             raise HTTPException(400, str(exc))
 
         batch_id = batch_store.new_id("batch")
-        doc = batch_to_dict(result, meta={"batch_id": batch_id, "tickers": tickers, "data_source": req.data_source})
+        doc = batch_to_dict(result, meta={"batch_id": batch_id, "tickers": tickers, "data_source": req.data_source,
+                                          "universe": universe})
         batch_store.save(doc)
         BatchHTMLReporter().write(doc, batch_store.path(batch_id))
         return doc

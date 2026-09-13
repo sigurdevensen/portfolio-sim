@@ -18,14 +18,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from research.batch import BatchConfig, run_batch
-from research.library import ALGORITHMS, families, filter_algorithms
+from research.library import families, filter_algorithms, library_for
 from research.report import batch_to_dict
+from research.universes import UNIVERSES, load_universe
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Batch-test the algorithm library with overfitting controls.")
-    parser.add_argument("--tickers", nargs="+", required=True)
-    parser.add_argument("--start", default="2015-01-01")
+    parser.add_argument("--tickers", nargs="+", default=None, help="Explicit tickers (or use --universe)")
+    parser.add_argument("--universe", choices=sorted(UNIVERSES), default=None,
+                        help="Named universe with external series + dividends (enables macro/event algorithms)")
+    parser.add_argument("--start", default=None)
     parser.add_argument("--end", default="2024-12-31")
     parser.add_argument("--families", nargs="*", default=None, help=f"Subset of families. Available: {', '.join(families())}")
     parser.add_argument("--data-types", nargs="*", default=None, choices=["price", "ohlc", "volume", "calendar", "cross_sectional"])
@@ -44,21 +47,31 @@ def main() -> None:
     parser.add_argument("--top", type=int, default=20, help="Rows to print")
     args = parser.parse_args()
 
-    if args.data_source == "lseg":
+    if not args.tickers and not args.universe:
+        raise SystemExit("Provide --tickers or --universe")
+    if args.universe:
+        market = load_universe(args.universe, start=args.start, end=args.end)
+        args.tickers = market.tickers
+        args.start = args.start or UNIVERSES[args.universe]["default_start"]
+        if market.meta.get("dropped"):
+            print(f"Dropped (insufficient history): {market.meta['dropped']}")
+    elif args.data_source == "lseg":
         from data.lseg import LSEGDataFeed
         from data.market import MarketData
+        args.start = args.start or "2015-01-01"
         market = MarketData.from_close(LSEGDataFeed().fetch_prices(args.tickers, args.start, args.end))
     else:
         from data.market import fetch_market_data
+        args.start = args.start or "2015-01-01"
         market = fetch_market_data(args.tickers, args.start, args.end)
 
-    specs = filter_algorithms(families=args.families, data_types=args.data_types, limit=args.limit)
+    specs = filter_algorithms(families=args.families, data_types=args.data_types, limit=args.limit, universe=args.universe)
     cfg = BatchConfig(
         start=args.start, end=args.end, initial_capital=args.capital, commission=args.commission,
         slippage_bps=args.slippage_bps, execution_lag=args.execution_lag, is_fraction=args.is_fraction,
         n_boot=args.n_boot, pbo_blocks=args.pbo_blocks, min_trades=args.min_trades,
     )
-    print(f"Testing {len(specs)} of {len(ALGORITHMS)} algorithms on {args.tickers} ({args.start} -> {args.end}), "
+    print(f"Testing {len(specs)} of {len(library_for(args.universe))} algorithms on {args.tickers} ({args.start} -> {args.end}), "
           f"{len(market.index)} days, n_jobs={args.n_jobs} ...")
     t0 = time.time()
 
@@ -98,7 +111,7 @@ def main() -> None:
     if args.output:
         out = Path(args.output)
         out.mkdir(parents=True, exist_ok=True)
-        d = batch_to_dict(res, meta={"batch_id": out.name, "tickers": args.tickers})
+        d = batch_to_dict(res, meta={"batch_id": out.name, "tickers": args.tickers, "universe": args.universe})
         (out / "batch.json").write_text(json.dumps(d), encoding="utf-8")
         try:
             from evaluation.html_reporter import BatchHTMLReporter

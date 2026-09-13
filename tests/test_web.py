@@ -264,3 +264,39 @@ def test_batch_unknown_family_400(lab_client):
 def test_index_has_lab_tab(lab_client):
     assert "Algorithm lab" in lab_client.get("/").text
     assert lab_client.get("/static/batch.js").status_code == 200
+
+
+def _fake_universe(name, start=None, end="2024-12-31", use_cache=True, min_history_days=500):
+    m = _fake_market(["AAA.OL", "BBB.OL", "CCC.OL"], start, end)
+    rng = np.random.default_rng(3)
+    for k in ("brent", "wti", "usdnok", "eurnok", "vix", "spx", "us10y", "gold", "copper", "natgas", "obx", "stoxx50"):
+        m.attach_extra(k, pd.Series(50 * np.cumprod(1 + rng.normal(0, 0.01, len(m.index))), index=m.index))
+    m.dividends = pd.DataFrame(0.0, index=m.index, columns=m.close.columns)
+    m.meta["universe"] = name
+    return m
+
+
+def test_algorithms_endpoint_lists_universes_and_expands_for_oslo(lab_client):
+    base = lab_client.get("/api/algorithms").json()
+    oslo = lab_client.get("/api/algorithms", params={"universe": "oslo"}).json()
+    assert "oslo" in base["universes"]
+    assert oslo["count"] > base["count"]
+    assert "macro_trend" in oslo["families"]
+
+
+def test_batch_with_universe_uses_macro_algorithms(tmp_path):
+    app = create_app(RunStore(tmp_path / "runs"), BatchStore(tmp_path / "batches"))
+    with patch("web.app.load_universe", side_effect=_fake_universe):
+        with TestClient(app) as c:
+            r = c.post("/api/batch", json=_batch_request(tickers=[], universe="oslo",
+                                                        families=["macro_trend", "dividend_capture", "random"], limit=6))
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["meta"]["universe"] == "oslo"
+    assert d["meta"]["tickers"] == ["AAA.OL", "BBB.OL", "CCC.OL"]
+    assert {row["family"] for row in d["leaderboard"]} & {"macro_trend", "dividend_capture"}
+
+
+def test_batch_unknown_universe_400(lab_client):
+    r = lab_client.post("/api/batch", json=_batch_request(tickers=[], universe="mars"))
+    assert r.status_code == 400
