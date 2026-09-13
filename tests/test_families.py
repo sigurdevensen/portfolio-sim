@@ -23,6 +23,11 @@ def _market(n: int = 320, tickers=("AAA", "BBB", "CCC", "DDD"), seed: int = 0) -
     m = MarketData.from_close(close)
     m.volume.loc[:, :] = rng.integers(500, 1500, size=close.shape).astype(float)
     m.synthetic = False
+    # external series + dividends so macro/event families can run too
+    for name in ("brent", "wti", "usdnok", "eurnok", "vix", "spx", "us10y", "gold", "copper", "natgas", "obx", "stoxx50"):
+        m.attach_extra(name, pd.Series(50 * np.cumprod(1 + rng.normal(0, 0.01, n)), index=idx))
+    m.dividends = pd.DataFrame(0.0, index=idx, columns=close.columns)
+    m.dividends.iloc[min(60, n - 1), 0] = 1.0
     return m
 
 

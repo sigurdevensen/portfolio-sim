@@ -30,6 +30,13 @@ DATA_TYPES: dict[str, str] = {
     # universe-relative
     "low_volatility": "cross_sectional", "dual_momentum": "cross_sectional",
     "relative_strength": "cross_sectional", "high_52w": "cross_sectional", "momentum": "cross_sectional",
+    "weekly_reversal": "cross_sectional",
+    # external / macro series
+    "macro_trend": "macro", "macro_level": "macro", "macro_beta_rotation": "macro",
+    "cross_asset_agreement": "macro", "relative_to_index": "macro", "index_dip_buy": "macro",
+    "vix_spike_reversal": "macro", "us_lead_lag": "macro",
+    # corporate actions
+    "dividend_capture": "events", "post_dividend_reversal": "events",
 }
 
 
@@ -161,8 +168,81 @@ def _build_library() -> list[AlgoSpec]:
     return lib
 
 
+def _build_oslo_library() -> list[AlgoSpec]:
+    """Universe-specific ideas that need external series or dividends.
+
+    Designed for Oslo (oil, NOK, seafood dividends) but valid for any universe whose
+    MarketData carries the same extras. Parameters are a priori, as in the base library.
+    """
+    lib: list[AlgoSpec] = []
+    P = lambda **kw: kw  # noqa: E731
+
+    # Oil is the OSE macro factor: long the exchange only when Brent trends up (and the inverse control)
+    lib += _variants("macro_trend", [P(series="brent", window=20, direction=1), P(series="brent", window=60, direction=1),
+                                     P(series="brent", window=120, direction=1), P(series="brent", window=60, direction=-1),
+                                     P(series="wti", window=60, direction=1)])
+    # NOK: weaker krone (usdnok up) helps exporters; both directions tested
+    lib += _variants("macro_trend", [P(series="usdnok", window=60, direction=1), P(series="usdnok", window=60, direction=-1),
+                                     P(series="eurnok", window=60, direction=1)])
+    # Global risk appetite and rates
+    lib += _variants("macro_trend", [P(series="spx", window=60, direction=1), P(series="spx", window=120, direction=1),
+                                     P(series="stoxx50", window=60, direction=1), P(series="vix", window=20, direction=-1),
+                                     P(series="us10y", window=60, direction=-1), P(series="copper", window=60, direction=1),
+                                     P(series="gold", window=60, direction=1), P(series="natgas", window=60, direction=1)])
+    lib += _variants("macro_trend", [P(series="brent", window=60, direction=1)], stop_loss=0.10)
+    # Level regimes
+    lib += _variants("macro_level", [P(series="vix", threshold=20.0, below=True), P(series="vix", threshold=25.0, below=True),
+                                     P(series="vix", threshold=30.0, below=True), P(series="us10y", threshold=3.0, below=True),
+                                     P(series="brent", threshold=60.0, below=False), P(series="usdnok", threshold=8.5, below=False)])
+    # Sector rotation on macro beta
+    lib += _variants("macro_beta_rotation", [P(series="brent", beta_window=120, mom_window=60, top_n=5),
+                                             P(series="brent", beta_window=250, mom_window=120, top_n=8),
+                                             P(series="usdnok", beta_window=120, mom_window=60, top_n=5),
+                                             P(series="spx", beta_window=120, mom_window=60, top_n=5),
+                                             P(series="brent", beta_window=120, mom_window=20, top_n=3)])
+    # Agreement between own momentum and two macro drivers
+    lib += _variants("cross_asset_agreement", [P(mom_window=60, series_a="brent", series_b="spx"),
+                                               P(mom_window=120, series_a="brent", series_b="spx"),
+                                               P(mom_window=60, series_a="obx", series_b="spx"),
+                                               P(mom_window=60, series_a="brent", series_b="usdnok")])
+    # Relative strength against the OBX index
+    lib += _variants("relative_to_index", [P(series="obx", window=21), P(series="obx", window=63), P(series="obx", window=126),
+                                           P(series="stoxx50", window=63)])
+    # Index-level dip buying and fear spikes
+    lib += _variants("index_dip_buy", [P(series="obx", drawdown=0.05, window=63, exit_dd=0.01),
+                                       P(series="obx", drawdown=0.10, window=126, exit_dd=0.02),
+                                       P(series="obx", drawdown=0.15, window=252, exit_dd=0.03),
+                                       P(series="spx", drawdown=0.10, window=126, exit_dd=0.02)])
+    lib += _variants("vix_spike_reversal", [P(spike=0.20, window=20), P(spike=0.30, window=20), P(spike=0.50, window=40)])
+    # US close leads the Oslo session
+    lib += _variants("us_lead_lag", [P(lookback=1), P(lookback=2), P(lookback=5)])
+    # Corporate actions: Norwegian dividend season is concentrated and generous
+    lib += _variants("dividend_capture", [P(days_before=5, days_after=1), P(days_before=10, days_after=0),
+                                          P(days_before=20, days_after=0), P(days_before=2, days_after=2)])
+    lib += _variants("post_dividend_reversal", [P(hold=3), P(hold=5), P(hold=10), P(hold=20)])
+    lib += _variants("sell_in_may", [P(long_months="3,4,5"), P(long_months="2,5,8,11"), P(long_months="12,1,2,3,4,5")])
+    # Short-term reversal (price only, but new)
+    lib += _variants("weekly_reversal", [P(lookback=5, top_n=3), P(lookback=5, top_n=5), P(lookback=10, top_n=5)])
+
+    names = [a.name for a in lib]
+    if len(names) != len(set(names)):
+        dupes = sorted({n for n in names if names.count(n) > 1})
+        raise RuntimeError(f"Duplicate algorithm names in oslo library: {dupes}")
+    return lib
+
+
 ALGORITHMS: list[AlgoSpec] = _build_library()
-BY_NAME: dict[str, AlgoSpec] = {a.name: a for a in ALGORITHMS}
+OSLO_ALGORITHMS: list[AlgoSpec] = _build_oslo_library()
+BY_NAME: dict[str, AlgoSpec] = {a.name: a for a in ALGORITHMS + OSLO_ALGORITHMS}
+
+UNIVERSE_ADDITIONS: dict[str, list[AlgoSpec]] = {"oslo": OSLO_ALGORITHMS, "us10": OSLO_ALGORITHMS}
+
+
+def library_for(universe: str | None) -> list[AlgoSpec]:
+    """Base library plus the additions that a universe's external data makes possible."""
+    if universe is None:
+        return list(ALGORITHMS)
+    return list(ALGORITHMS) + list(UNIVERSE_ADDITIONS.get(universe, []))
 
 
 def build_algorithm(spec: AlgoSpec) -> Strategy:
@@ -183,12 +263,13 @@ def filter_algorithms(
     data_types: Iterable[str] | None = None,
     names: Iterable[str] | None = None,
     limit: int | None = None,
+    universe: str | None = None,
 ) -> list[AlgoSpec]:
     fam = set(families) if families else None
     dts = set(data_types) if data_types else None
     nms = set(names) if names else None
     out = [
-        a for a in ALGORITHMS
+        a for a in library_for(universe)
         if (fam is None or a.family in fam)
         and (dts is None or a.data_type in dts)
         and (nms is None or a.name in nms)

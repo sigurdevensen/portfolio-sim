@@ -78,3 +78,52 @@ def test_every_algorithm_runs_on_synthetic_market(spec):
     result = BacktestEngine(cfg).run(build_algorithm(spec), market.close, market=market)
     assert len(result.nav) == len(market.index)
     assert np.isfinite(result.nav.to_numpy()).all()
+
+
+# ── universe-specific additions (Oslo / macro / events) ────────────────────
+
+from research.library import OSLO_ALGORITHMS, library_for
+
+
+def test_oslo_additions_are_substantial_and_unique():
+    assert len(OSLO_ALGORITHMS) >= 45
+    names = [a.name for a in OSLO_ALGORITHMS]
+    assert len(names) == len(set(names))
+    assert not (set(names) & {a.name for a in ALGORITHMS})
+
+
+def test_oslo_additions_use_macro_and_event_data():
+    data_types = {a.data_type for a in OSLO_ALGORITHMS}
+    assert {"macro", "events"} <= data_types
+    series_used = {a.params.get("series") for a in OSLO_ALGORITHMS if "series" in a.params}
+    assert {"brent", "usdnok", "vix", "spx", "obx"} <= series_used
+
+
+def test_library_for_oslo_is_base_plus_additions():
+    lib = library_for("oslo")
+    assert len(lib) == len(ALGORITHMS) + len(OSLO_ALGORITHMS)
+    assert library_for(None) == ALGORITHMS
+    assert library_for("us10") == ALGORITHMS + OSLO_ALGORITHMS  # macro ideas apply to any universe with extras
+
+
+def _market_with_extras(n: int = 320, tickers=("AAA", "BBB", "CCC", "DDD"), seed: int = 8) -> MarketData:
+    rng = np.random.default_rng(seed)
+    idx = pd.date_range("2022-01-03", periods=n, freq="B", tz="UTC")
+    close = pd.DataFrame({t: 100 * np.cumprod(1 + rng.normal(0.0003, 0.012, n)) for t in tickers}, index=idx)
+    m = MarketData.from_close(close)
+    m.volume.loc[:, :] = rng.integers(500, 1500, size=close.shape).astype(float)
+    for name in ("brent", "wti", "usdnok", "eurnok", "vix", "spx", "us10y", "gold", "copper", "natgas", "obx", "stoxx50"):
+        m.attach_extra(name, pd.Series(50 * np.cumprod(1 + rng.normal(0, 0.01, n)), index=idx))
+    m.dividends = pd.DataFrame(0.0, index=idx, columns=close.columns)
+    m.dividends.iloc[80, 0] = 1.0
+    m.dividends.iloc[200, 2] = 2.0
+    return m
+
+
+@pytest.mark.parametrize("spec", OSLO_ALGORITHMS, ids=lambda s: s.name)
+def test_every_oslo_algorithm_runs_with_extras(spec):
+    market = _market_with_extras()
+    cfg = BacktestConfig(start="2022-01-03", end="2023-12-31", initial_capital=100_000.0)
+    result = BacktestEngine(cfg).run(build_algorithm(spec), market.close, market=market)
+    assert len(result.nav) == len(market.index)
+    assert np.isfinite(result.nav.to_numpy()).all()
