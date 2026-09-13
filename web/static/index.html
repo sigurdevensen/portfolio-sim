@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>portfolio-sim platform</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+</head>
+<body>
+<div class="shell">
+  <div class="topbar">
+    <div class="brand"><span class="dot"></span><h1>portfolio-sim</h1><span class="muted">quantitative trading platform</span></div>
+    <div class="spacer"></div>
+    <a id="report-link" class="muted" href="#" hidden target="_blank" rel="noopener">Open standalone report ↗</a>
+    <button class="ghost" id="theme-toggle" type="button">Toggle theme</button>
+  </div>
+
+  <div class="platform">
+    <aside>
+      <div class="card">
+        <h2>New backtest</h2>
+        <form id="run-form">
+          <label for="strategy">Strategy</label>
+          <select id="strategy" name="strategy"></select>
+          <div class="muted" id="strategy-desc" style="font-size:12px;margin-top:4px"></div>
+          <div class="params" id="params"></div>
+
+          <label for="tickers">Tickers (space or comma separated)</label>
+          <input id="tickers" name="tickers" value="AAPL MSFT" required>
+
+          <div class="row">
+            <div><label for="start">Start</label><input id="start" name="start" type="date" value="2018-01-01" required></div>
+            <div><label for="end">End</label><input id="end" name="end" type="date" value="2024-12-31" required></div>
+          </div>
+
+          <div class="row">
+            <div><label for="benchmark">Benchmark (optional)</label><input id="benchmark" name="benchmark" placeholder="SPY"></div>
+            <div><label for="data_source">Data source</label>
+              <select id="data_source" name="data_source"><option value="yfinance">yfinance</option><option value="lseg">LSEG Workspace</option></select></div>
+          </div>
+
+          <div class="row">
+            <div><label for="initial_capital">Capital</label><input id="initial_capital" name="initial_capital" type="number" step="any" value="1000000"></div>
+            <div><label for="commission">Commission (fraction)</label><input id="commission" name="commission" type="number" step="any" value="0.001"></div>
+          </div>
+          <div class="row">
+            <div><label for="slippage_bps">Slippage (bps)</label><input id="slippage_bps" name="slippage_bps" type="number" step="any" value="5"></div>
+            <div><label for="execution_lag">Execution lag (bars)</label><input id="execution_lag" name="execution_lag" type="number" min="0" step="1" value="1"></div>
+          </div>
+          <div class="row">
+            <div><label for="max_weight">Max weight (blank = equal)</label><input id="max_weight" name="max_weight" type="number" step="any" min="0" max="1" placeholder="e.g. 0.25"></div>
+            <div><label for="risk_free_rate">Risk-free rate (ann.)</label><input id="risk_free_rate" name="risk_free_rate" type="number" step="any" value="0"></div>
+          </div>
+          <div class="row" style="align-items:end">
+            <div><label for="n_samples">Bootstrap samples</label><input id="n_samples" name="n_samples" type="number" min="10" max="20000" step="10" value="1000"></div>
+            <div style="padding-bottom:8px">
+              <label><input type="checkbox" id="rebalance" name="rebalance" checked> Rebalance on signal</label>
+              <label><input type="checkbox" id="significance" name="significance" checked> Significance tests</label>
+            </div>
+          </div>
+
+          <div style="margin-top:14px"><button class="primary" type="submit" id="run-btn">Run backtest</button></div>
+          <div class="status" id="status"></div>
+          <div class="error" id="error"></div>
+        </form>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <h2 style="margin:0">Saved runs</h2>
+          <button class="ghost" id="refresh-runs" type="button">Refresh</button>
+        </div>
+        <ul class="runs" id="runs"></ul>
+      </div>
+    </aside>
+
+    <main id="report">
+      <div class="card"><div class="empty">Run a backtest or pick a saved run to see its report.</div></div>
+    </main>
+  </div>
+</div>
+<script src="/static/report.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
