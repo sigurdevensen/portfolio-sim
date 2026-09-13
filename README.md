@@ -49,7 +49,8 @@ variants add a 10 % stop-loss or a 15 % trailing stop. Five **random-signal cont
 are included so the framework can be seen to reject noise.
 
 Named universes live in `research/universes.py` (`oslo`: 36 OSE names with macro
-series, dividends and a sector map; `us10`). `load_universe()` attaches everything to
+series, dividends and a sector map; `oslo_holdout`: 65 disjoint OSEAX names for
+pre-registered replication; `us10`). `load_universe()` attaches everything to
 one `MarketData`; strategies read `market.extra[...]`, `market.dividends` and
 `market.meta["sectors"]`.
 
@@ -91,9 +92,15 @@ next-close fills), 796 trials counted, benchmark equal-weight buy-and-hold (Shar
 - **Two alpha-view candidates** (FDR p = 0.095): the Amihud **illiquidity ranking**
   (alpha ≈ 12 %/yr, t = 3.1, beta 0.63, Sharpe 1.28 vs 0.97, positive in every 5-year
   block and under leave-one-out) and a low-beta ranking (alpha absent 2020–24).
-- Caveats on the illiquidity result: the universe consists of survivors (LSEG's
-  historical constituent fields are not in this licence, so point-in-time membership
-  could not be built), and the picks trade 2–8 mNOK/day, so capacity is tiny.
+- **Pre-registered replication** of the illiquidity ranking on `oslo_holdout` — 58 OSEAX
+  names never used in the search: alpha 12.7 %/yr, HAC t = 2.46, one-sided p = 0.007,
+  alpha positive in both halves and in all five blocks, excess Sharpe 0.31 / 0.55
+  (IS / OOS), random controls at zero. **H1 confirmed**; Fisher-combined p across the two
+  disjoint universes 0.00008. This is the one result the lab treats as an edge.
+- Caveats that remain: both universes consist of survivors (LSEG point-in-time
+  constituents are not in this licence), the effect sits in the thinnest names
+  (0.3–8 mNOK/day), so it is a small-account edge, and the sensitivity run restricted
+  to names already liquid in 2010–11 is weaker (t = 1.15).
 - Same libraries on 10 US mega-caps and 10 ETFs: nothing beats buy-and-hold.
 
 The lab tab of the website shows the verdict, an IS-vs-OOS excess-Sharpe scatter (the

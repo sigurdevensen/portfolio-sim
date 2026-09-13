@@ -111,3 +111,23 @@ buy-and-hold run alongside as calibration. `prior_trials = 796` for DSR.
 replicated edge, with the survivorship caveat quantified by a sensitivity run that keeps
 only names whose 2010-2011 traded value was above the universe median. H1 not confirmed
 -> report that the candidate did not replicate and the search found no edge.
+
+
+## Replication outcome (run once, after pre-registration)
+
+Holdout universe loaded with 58 names (7 dropped a priori for corrupt data or < 0.2 mNOK/day).
+Benchmark equal-weight buy-and-hold Sharpe 0.42. Random controls: 0 flagged in either view.
+
+| Variant | alpha/yr | IS alpha | OOS alpha | HAC t | one-sided p | BH (3 tests) | alpha stability | excess Sharpe IS / OOS |
+|---|---|---|---|---|---|---|---|---|
+| illiquidity_rank_252_5 (H1) | 12.7 % | 9.9 % | 16.7 % | 2.46 | 0.0070 | 0.021 | 5/5 blocks | 0.31 / 0.55 |
+| illiquidity_rank_252_8 | 9.2 % | 6.6 % | 12.8 % | 1.83 | 0.034 | 0.051 | 4/5 | 0.24 / 0.42 |
+| illiquidity_rank_126_8 | 7.5 % | -2.2 % | 21.8 % | 1.17 | 0.120 | 0.120 | 3/5 | -0.15 / 0.57 |
+
+**H1 confirmed** under the pre-registered rule (p < 0.05, alpha > 0 in both halves).
+Combined with the search universe (t 3.12, p 0.0009 on 36 disjoint names), Fisher's
+combined p = 0.00008. Sensitivity run (holdout names above the 2010-11 median traded
+value, n = 23): alpha 8.3 %/yr, t 1.15 — the effect is concentrated in the thinnest
+names and cannot be separated from survivorship bias with yfinance data; point-in-time
+membership is not available in the LSEG licence. Capacity is limited to small accounts
+(picks trade 0.3-8 mNOK/day).

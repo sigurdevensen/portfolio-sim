@@ -68,9 +68,12 @@ pytest tests/                                # ~1 minute; batch tests use n_jobs
   small in tests.
 - **Sizing:** use `sizing="active"` with `rebalance_band=0.25` for cross-sectional
   comparisons (fixed sizing leaves top-N strategies mostly in cash).
-- **Known result (Sept 2026):** on the Oslo universe no algorithm passes the strong gate
-  after 796 trials; the illiquidity ranking is the only robust alpha candidate and
-  carries survivorship and capacity caveats. See README "What the lab found".
+- **Known result (Sept 2026):** on the Oslo search universe no algorithm passes the strong
+  gate after 796 trials. The Amihud illiquidity ranking (`illiquidity_rank_252_5`) was
+  then confirmed by a pre-registered single-hypothesis test on the disjoint
+  `oslo_holdout` universe (t 2.46, p 0.007). Treat it as a small-account edge with a
+  survivorship caveat; never re-tune it. `oslo_holdout` is reserved for pre-registered
+  confirmations only — do not search on it. See README "What the lab found".
 - Backtest results are `BacktestResult`; evaluated results are `BacktestReport`;
   batches are `BatchResult`. Never pass raw dicts between stages.
 - `evaluation/serialize.py:report_to_dict` and `research/report.py:batch_to_dict` are
