@@ -66,7 +66,6 @@ universe with the same costs** (market beta is not skill):
 | White's Reality Check | Joint bootstrap null for the *best* algorithm's performance. |
 | Probability of Backtest Overfitting (CSCV) | How often is the in-sample winner below median out of sample? |
 | Block stability, MinTRL | Is the edge consistent across time, and how much history would confirm it? |
-
 | Jensen's alpha (HAC t-stat) | Is there return unexplained by benchmark exposure? (A half-invested strategy has beta 0.5 and negative excess return but may still have alpha.) |
 
 Verdict per algorithm: **strong** (`p_fdr < 0.05`, DSR > 0.95, OOS excess Sharpe > 0,
