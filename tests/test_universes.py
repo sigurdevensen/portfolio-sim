@@ -50,3 +50,10 @@ def test_load_universe_attaches_extras_and_dividends(m1, m2, m3):
     assert m.dividends is not None and m.dividends.shape == m.close.shape
     assert m.meta["universe"] == "oslo"
     assert UNIVERSES["oslo"]["description"]
+
+
+def test_oslo_sector_map_covers_universe():
+    from research.universes import OSLO_SECTORS
+    missing = [t for t in universe_tickers("oslo") if t not in OSLO_SECTORS]
+    assert missing == []
+    assert len(set(OSLO_SECTORS.values())) >= 8

@@ -1,4 +1,12 @@
-from .anomalies import ANOMALY_FAMILIES, DividendYieldRank, LongTermReversal, LowBetaRank, RelativeVolRegime
+from .anomalies import (
+    ANOMALY_FAMILIES,
+    DividendYieldRank,
+    IlliquidityRank,
+    LongTermReversal,
+    LowBetaRank,
+    RelativeVolRegime,
+    SectorMomentum,
+)
 from .base import Strategy
 from .buy_and_hold import BuyAndHold
 from .calendar import CALENDAR_FAMILIES, DayOfWeek, SellInMay, TurnOfMonth
@@ -65,6 +73,6 @@ __all__ = [
     "MacroTrendFilter", "MacroLevelRegime", "MacroBetaRotation", "CrossAssetAgreement",
     "RelativeToIndex", "IndexDipBuy", "VIXSpikeReversal", "USLeadLag",
     "DividendCapture", "PostDividendReversal", "WeeklyReversal",
-    "DividendYieldRank", "LowBetaRank", "LongTermReversal", "RelativeVolRegime",
+    "DividendYieldRank", "LowBetaRank", "LongTermReversal", "RelativeVolRegime", "SectorMomentum", "IlliquidityRank",
     "RandomSignal",
 ]

@@ -92,4 +92,51 @@ class RelativeVolRegime(Strategy):
         return state_signals(vol < ref, valid=vol.notna() & ref.notna())
 
 
-ANOMALY_FAMILIES = [DividendYieldRank, LowBetaRank, LongTermReversal, RelativeVolRegime]
+class SectorMomentum(Strategy):
+    """Industry momentum (Moskowitz & Grinblatt 1999): hold every stock in the ``top_k`` sectors
+    by trailing ``lookback`` equal-weight sector return. Needs ``market.meta['sectors']``."""
+
+    name = "sector_momentum"
+
+    def __init__(self, lookback: int = 126, top_k: int = 2, skip: int = 21) -> None:
+        self.lookback, self.top_k, self.skip = lookback, top_k, skip
+
+    def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+        raise KeyError(f"{self.name} needs MarketData.meta['sectors']")
+
+    def generate_signals_market(self, market: MarketData) -> pd.DataFrame:
+        sectors = market.meta.get("sectors")
+        if not sectors:
+            raise KeyError(f"{self.name} needs MarketData.meta['sectors'] (a ticker -> sector map)")
+        close = market.close
+        ret = close.shift(self.skip) / close.shift(self.lookback) - 1
+        labels = pd.Series({t: sectors.get(t, "other") for t in close.columns})
+        sector_ret = ret.T.groupby(labels).mean().T                   # date x sector
+        rank = sector_ret.rank(axis=1, ascending=False, method="first")
+        top = rank <= self.top_k                                       # date x sector bool
+        long = pd.DataFrame({t: top[labels[t]] if labels[t] in top else False for t in close.columns}, index=close.index)
+        return state_signals(long, valid=ret.notna())
+
+
+class IlliquidityRank(Strategy):
+    """Illiquidity premium (Amihud 2002): hold the ``top_n`` least liquid names by
+    mean |return| / traded value over ``window`` days. Needs volume."""
+
+    name = "illiquidity_rank"
+    requires = {"close", "volume"}
+
+    def __init__(self, window: int = 252, top_n: int = 8) -> None:
+        self.window, self.top_n = window, top_n
+
+    def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+        return self.generate_signals_market(MarketData.from_close(data))
+
+    def generate_signals_market(self, market: MarketData) -> pd.DataFrame:
+        ret = market.close.pct_change(fill_method=None).abs()
+        value = (market.close * market.volume).replace(0, np.nan)
+        amihud = (ret / value).rolling(self.window, min_periods=self.window // 2).mean()
+        rank = amihud.rank(axis=1, ascending=False, method="first")   # 1 = most illiquid
+        return state_signals(rank <= self.top_n, valid=amihud.notna())
+
+
+ANOMALY_FAMILIES = [DividendYieldRank, LowBetaRank, LongTermReversal, RelativeVolRegime, SectorMomentum, IlliquidityRank]

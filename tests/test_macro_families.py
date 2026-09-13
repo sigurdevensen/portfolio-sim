@@ -34,6 +34,7 @@ def _market(n: int = 300, tickers=("AAA", "BBB", "CCC"), seed: int = 5) -> Marke
     m.dividends = pd.DataFrame(0.0, index=idx, columns=close.columns)
     m.dividends.iloc[100, 0] = 2.0
     m.dividends.iloc[200, 1] = 1.0
+    m.meta["sectors"] = {t: ("a" if i % 2 == 0 else "b") for i, t in enumerate(tickers)}
     return m
 
 
@@ -236,3 +237,39 @@ def test_relative_vol_regime_out_when_vol_elevated():
     close = pd.DataFrame({"AAA": 100 * np.cumprod(1 + rng.normal(0, 1, n) * vol)}, index=idx)
     sig = RelativeVolRegime(window=20, ref_window=252).generate_signals(close)
     assert (sig["AAA"].iloc[640:] == -1).all()
+
+
+# ── round 3: sector and liquidity data ─────────────────────────────────────
+
+from strategies.anomalies import IlliquidityRank, SectorMomentum
+
+
+def test_sector_momentum_holds_top_sector_members():
+    n = 300
+    idx = pd.date_range("2022-01-03", periods=n, freq="B", tz="UTC")
+    close = pd.DataFrame({
+        "E1": np.linspace(100, 200, n), "E2": np.linspace(100, 190, n),      # energy: strong
+        "F1": np.linspace(100, 90, n), "F2": np.linspace(100, 95, n),        # financials: weak
+        "S1": np.linspace(100, 120, n),                                      # seafood: middling
+    }, index=idx)
+    m = MarketData.from_close(close)
+    m.meta["sectors"] = {"E1": "energy", "E2": "energy", "F1": "financials", "F2": "financials", "S1": "seafood"}
+    sig = SectorMomentum(lookback=60, top_k=1, skip=5).generate_signals_market(m)
+    assert (sig[["E1", "E2"]].iloc[70:] == 1).all().all()
+    assert (sig[["F1", "F2", "S1"]].iloc[70:] == -1).all().all()
+
+
+def test_sector_momentum_requires_sector_map():
+    m = _market()
+    m.meta.pop("sectors", None)
+    with pytest.raises(KeyError, match="sectors"):
+        SectorMomentum().generate_signals_market(m)
+
+
+def test_illiquidity_rank_prefers_thinly_traded_name():
+    m = _market(n=400)
+    m.volume.loc[:, :] = 1_000_000.0
+    m.volume["CCC"] = 1_000.0          # thinly traded
+    sig = IlliquidityRank(window=60, top_n=1).generate_signals_market(m)
+    assert (sig["CCC"].iloc[70:] == 1).all()
+    assert (sig["AAA"].iloc[70:] == -1).all()

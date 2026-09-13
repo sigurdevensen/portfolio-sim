@@ -92,17 +92,22 @@ def main() -> None:
     print(f"  Strong edges: {s['n_strong']}   candidates: {s['n_candidate']}   "
           f"random controls flagged strong: {s['n_random_controls_strong']}")
     print(f"  Best in-sample: {s['best_is_name']}  IS excess Sharpe {s['best_is_sharpe_is']:.2f} -> OOS {s['best_is_oos_sharpe']:.2f}")
+    print(f"  Beta-adjusted view (Jensen alpha, HAC t-stat, FDR over N): strong {s['n_alpha_strong']}  "
+          f"candidates {s['n_alpha_candidate']}  best {s['best_alpha_name']} t={s['best_alpha_t']:.2f} "
+          f"p_fdr={s['best_alpha_p_fdr']:.3f}  random controls flagged {s['n_random_controls_alpha_strong']}")
     if s["best_is_consistent_with_luck"]:
         print("  => The best result is consistent with luck given the number of trials.")
     else:
         print("  => The best result is NOT explained by selection alone.")
 
-    cols = ["family", "excess_sharpe_is", "excess_sharpe_oos", "sharpe_full", "cagr_full", "max_drawdown_full", "n_trades",
-            "p_value", "p_fdr", "dsr", "stability", "edge"]
+    cols = ["family", "excess_sharpe_is", "excess_sharpe_oos", "sharpe_full", "max_drawdown_full", "n_trades",
+            "p_fdr", "dsr", "edge", "alpha_ann", "alpha_oos_ann", "beta", "alpha_t", "p_alpha_fdr", "alpha_edge"]
     import pandas as pd
     with pd.option_context("display.width", 220, "display.max_columns", 30):
         print("\n-- Leaderboard (sorted by in-sample excess Sharpe) -----")
         print(res.leaderboard[cols].head(args.top).round(3).to_string())
+        print("\n-- Top by alpha t-stat -----------------------------------")
+        print(res.leaderboard.sort_values("alpha_t", ascending=False)[cols].head(min(args.top, 12)).round(3).to_string())
     if res.errors:
         print("\nErrors:")
         for k, v in res.errors.items():

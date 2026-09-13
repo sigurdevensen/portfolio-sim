@@ -228,6 +228,42 @@ def pbo_cscv(r: np.ndarray, n_blocks: int = 16) -> dict[str, Any]:
     }
 
 
+# ── Jensen's alpha with Newey-West standard errors ─────────────────────────
+
+def jensen_alpha(r: np.ndarray, benchmark: np.ndarray, lags: int | None = None) -> dict[str, np.ndarray]:
+    """OLS ``r = alpha + beta * benchmark + e`` per column, HAC (Newey-West) t-stats.
+
+    Alpha is the return unexplained by benchmark exposure: a strategy that holds
+    half the market has beta 0.5 and zero alpha even though its excess return
+    over the fully invested benchmark is negative. Returns per-period alpha,
+    beta, t-stat and one-sided p-value (H1: alpha > 0).
+    """
+    r = np.asarray(r, dtype=float)
+    b = np.asarray(benchmark, dtype=float)
+    t, n = r.shape
+    lags = lags if lags is not None else int(np.floor(4 * (t / 100) ** (2 / 9)))
+    has_benchmark = np.std(b) > 0
+    # With no (or constant) benchmark the regression degenerates to alpha = mean(r).
+    x = np.column_stack([np.ones(t), b]) if has_benchmark else np.ones((t, 1))
+    xtx_inv = np.linalg.inv(x.T @ x)
+    coef = xtx_inv @ x.T @ r                                 # (k, n)
+    resid = r - x @ coef                                     # (t, n)
+
+    # Newey-West long-run covariance of the score, per column (vectorised over n)
+    scores = x[:, :, None] * resid[:, None, :]               # (t, 2, n)
+    s0 = np.einsum("tin,tjn->ijn", scores, scores)
+    for lag in range(1, lags + 1):
+        w = 1 - lag / (lags + 1)
+        g = np.einsum("tin,tjn->ijn", scores[lag:], scores[:-lag])
+        s0 += w * (g + g.transpose(1, 0, 2))
+    cov = np.einsum("ij,jkn,kl->iln", xtx_inv, s0, xtx_inv)  # (2, 2, n)
+    se_alpha = np.sqrt(np.clip(cov[0, 0, :], 1e-24, None))
+    t_stat = coef[0] / se_alpha
+    p_one = 1 - stats.norm.cdf(t_stat)
+    beta = coef[1] if has_benchmark else np.zeros(n)
+    return {"alpha_daily": coef[0], "beta": beta, "t_stat": t_stat, "p_value": p_one, "se_alpha": se_alpha}
+
+
 # ── stability ──────────────────────────────────────────────────────────────
 
 def block_stability(r: np.ndarray, k: int = 5) -> pd.DataFrame:
@@ -341,6 +377,15 @@ def assess(
     p_fdr = benjamini_hochberg(p_one)
     p_holm = holm(p_one)
 
+    # Beta-adjusted view: Jensen's alpha against the benchmark (full, IS, OOS)
+    ja = jensen_alpha(r, b)
+    ja_is = jensen_alpha(r_is, b[:split])
+    ja_oos = jensen_alpha(r_oos, b[split:])
+    p_alpha_fdr = benjamini_hochberg(ja["p_value"])
+    alpha_strong = (p_alpha_fdr < 0.05) & (ja_oos["alpha_daily"] > 0) & (ja_is["alpha_daily"] > 0) & enough_trades
+    alpha_candidate = ~alpha_strong & (p_alpha_fdr < 0.10) & (ja_oos["alpha_daily"] > 0) & enough_trades
+    alpha_edge = np.where(alpha_strong, "strong", np.where(alpha_candidate, "candidate", "none"))
+
     strong = (p_fdr < 0.05) & (dsr > 0.95) & (ex_oos > 0) & (stab["stability"].to_numpy() >= 0.6) & enough_trades
     candidate = ~strong & (p_fdr < 0.10) & (ex_oos > 0) & enough_trades
     edge = np.where(strong, "strong", np.where(candidate, "candidate", "none"))
@@ -355,6 +400,9 @@ def assess(
         "psr": psr, "dsr": dsr,
         "stability": stab["stability"].to_numpy(), "worst_block_sharpe": stab["worst_block_sharpe"].to_numpy(),
         "min_trl": min_trl, "n_trades": trades, "edge": edge,
+        "alpha_ann": ja["alpha_daily"] * TRADING_DAYS, "alpha_t": ja["t_stat"], "p_alpha": ja["p_value"],
+        "p_alpha_fdr": p_alpha_fdr, "alpha_is_ann": ja_is["alpha_daily"] * TRADING_DAYS,
+        "alpha_oos_ann": ja_oos["alpha_daily"] * TRADING_DAYS, "beta": ja["beta"], "alpha_edge": alpha_edge,
     }, index=pd.Index(names, name="algorithm"))
     lb = lb.sort_values(["excess_sharpe_is"], ascending=False, kind="stable")
 
@@ -384,6 +432,11 @@ def assess(
         "pbo_excluded_constant": int((~informative).sum()),
         "n_strong": int((edge == "strong").sum()),
         "n_candidate": int((edge == "candidate").sum()),
+        "n_alpha_strong": int((alpha_edge == "strong").sum()),
+        "n_alpha_candidate": int((alpha_edge == "candidate").sum()),
+        "best_alpha_name": str(names[int(np.argmax(ja["t_stat"]))]),
+        "best_alpha_t": float(np.max(ja["t_stat"])),
+        "best_alpha_p_fdr": float(p_alpha_fdr[int(np.argmax(ja["t_stat"]))]),
         "n_fdr_5pct": int((p_fdr < 0.05).sum()),
         "is_oos_rank_corr": float(corr) if corr is not None and not np.isnan(corr) else None,
         "best_is_name": best_is_name,

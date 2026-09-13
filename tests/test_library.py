@@ -117,6 +117,7 @@ def _market_with_extras(n: int = 320, tickers=("AAA", "BBB", "CCC", "DDD"), seed
     m.dividends = pd.DataFrame(0.0, index=idx, columns=close.columns)
     m.dividends.iloc[80, 0] = 1.0
     m.dividends.iloc[200, 2] = 2.0
+    m.meta["sectors"] = {t: ("a" if i % 2 == 0 else "b") for i, t in enumerate(tickers)}
     return m
 
 

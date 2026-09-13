@@ -28,6 +28,19 @@ MACRO_SYMBOLS: dict[str, str] = {
     "stoxx50": "^STOXX50E",
 }
 
+# Hand-assigned GICS-like sectors for the Oslo universe (a priori, public knowledge).
+OSLO_SECTORS: dict[str, str] = {
+    "EQNR.OL": "energy", "AKRBP.OL": "energy", "SUBC.OL": "energy_services", "TGS.OL": "energy_services",
+    "AKSO.OL": "energy_services", "ODL.OL": "energy_services", "BWLPG.OL": "shipping", "FRO.OL": "shipping",
+    "MOWI.OL": "seafood", "SALM.OL": "seafood", "LSG.OL": "seafood", "AUSS.OL": "seafood", "BAKKA.OL": "seafood",
+    "GSF.OL": "seafood", "DNB.OL": "financials", "STB.OL": "financials", "GJF.OL": "financials",
+    "MING.OL": "financials", "NONG.OL": "financials", "PROT.OL": "financials", "YAR.OL": "materials",
+    "NHY.OL": "materials", "TOM.OL": "industrials", "VEI.OL": "industrials", "AFG.OL": "industrials",
+    "KIT.OL": "industrials", "BONHR.OL": "industrials", "KOG.OL": "industrials", "WAWI.OL": "consumer",
+    "ORK.OL": "consumer", "NAS.OL": "consumer", "ATEA.OL": "technology", "NOD.OL": "technology",
+    "TEL.OL": "telecom", "SCATC.OL": "renewables", "ENTRA.OL": "real_estate",
+}
+
 UNIVERSES: dict[str, dict[str, Any]] = {
     "oslo": {
         "description": "28 Oslo Stock Exchange large/mid caps with yfinance history from 2008-2014: "
@@ -41,6 +54,7 @@ UNIVERSES: dict[str, dict[str, Any]] = {
         ],
         "extra": MACRO_SYMBOLS,
         "dividends": True,
+        "sectors": OSLO_SECTORS,
         "default_start": "2010-01-01",
     },
     "us10": {
@@ -88,4 +102,6 @@ def load_universe(
         market.dividends = fetch_dividends(keep, market.index, use_cache=use_cache)
 
     market.meta.update({"universe": name, "description": spec["description"], "dropped": dropped})
+    if spec.get("sectors"):
+        market.meta["sectors"] = {t: spec["sectors"].get(t, "other") for t in keep}
     return market

@@ -243,3 +243,57 @@ def test_pbo_ignores_constant_excess_columns():
     rep = assess(_frame(r), benchmark=_bench_series(market), n_boot=100, seed=0)
     assert 0.3 < rep.summary["pbo"] < 0.8
     assert rep.summary["pbo_excluded_constant"] == 1
+
+
+# ── Jensen's alpha view (beta-adjusted edge) ───────────────────────────────
+
+from research.edge import jensen_alpha
+
+
+def test_jensen_alpha_recovers_planted_alpha_and_beta():
+    rng = np.random.default_rng(21)
+    t_ = 2000
+    b = rng.normal(0.0004, 0.01, t_)
+    r = 0.0005 + 0.6 * b + rng.normal(0, 0.003, t_)
+    res = jensen_alpha(r[:, None], b)
+    assert res["beta"][0] == pytest.approx(0.6, abs=0.05)
+    assert res["alpha_daily"][0] == pytest.approx(0.0005, abs=0.0002)
+    assert res["t_stat"][0] > 3
+    assert res["p_value"][0] < 0.01
+
+
+def test_jensen_alpha_zero_for_scaled_benchmark():
+    rng = np.random.default_rng(22)
+    b = rng.normal(0.0008, 0.01, 1500)
+    r = 0.5 * b                       # half exposure, no alpha
+    res = jensen_alpha(r[:, None], b)
+    assert abs(res["alpha_daily"][0]) < 1e-12
+    assert res["p_value"][0] > 0.4
+
+
+def test_assess_alpha_columns_and_half_exposure_is_not_alpha_edge():
+    rng = np.random.default_rng(23)
+    t_ = 1200
+    market = rng.normal(0.001, 0.01, t_)
+    r = np.stack([0.5 * market + rng.normal(0, 0.002, t_) for _ in range(15)], axis=1)
+    n_trades = pd.Series(50, index=[f"algo_{i}" for i in range(15)])
+    rep = assess(_frame(r), benchmark=_bench_series(market), n_trades=n_trades, n_boot=100, seed=0)
+    for col in ("alpha_ann", "alpha_t", "p_alpha", "p_alpha_fdr", "alpha_oos_ann", "beta", "alpha_edge"):
+        assert col in rep.leaderboard.columns, col
+    assert (rep.leaderboard["alpha_edge"] != "strong").all()
+    assert rep.summary["n_alpha_strong"] == 0
+
+
+def test_assess_alpha_edge_detects_timing_alpha_despite_negative_excess_return():
+    rng = np.random.default_rng(24)
+    t_ = 1500
+    market = rng.normal(0.001, 0.01, t_)
+    r = np.stack([0.5 * market + rng.normal(0, 0.002, t_) for _ in range(15)], axis=1)
+    r[:, 0] = 0.5 * market + 0.0006 + rng.normal(0, 0.002, t_)     # half beta plus real alpha
+    n_trades = pd.Series(50, index=[f"algo_{i}" for i in range(15)])
+    rep = assess(_frame(r), benchmark=_bench_series(market), n_trades=n_trades, n_boot=100, seed=0)
+    lb = rep.leaderboard
+    assert lb.loc["algo_0", "excess_sharpe_full"] < 0          # loses to the benchmark on raw excess return
+    assert lb.loc["algo_0", "alpha_edge"] == "strong"          # but has genuine beta-adjusted alpha
+    assert (lb.drop("algo_0")["alpha_edge"] != "strong").all()
+    assert rep.summary["n_alpha_strong"] == 1

@@ -169,6 +169,7 @@ def run_batch(
     summary["n_requested"] = len(specs)
     summary["n_failed"] = len(errors)
     summary["n_random_controls_strong"] = int(((leaderboard["family"] == "random") & (leaderboard["edge"] == "strong")).sum())
+    summary["n_random_controls_alpha_strong"] = int(((leaderboard["family"] == "random") & (leaderboard["alpha_edge"] == "strong")).sum())
     summary["families"] = sorted(leaderboard["family"].unique().tolist())
     summary["benchmark_name"] = "buy_and_hold_equal_weight"
 

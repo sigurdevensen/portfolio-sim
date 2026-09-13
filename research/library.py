@@ -39,6 +39,7 @@ DATA_TYPES: dict[str, str] = {
     "dividend_capture": "events", "post_dividend_reversal": "events", "dividend_yield_rank": "events",
     # documented anomalies
     "low_beta_rank": "macro", "long_term_reversal": "cross_sectional", "relative_vol_regime": "price",
+    "sector_momentum": "sector", "illiquidity_rank": "volume",
 }
 
 
@@ -236,6 +237,11 @@ def _build_oslo_library() -> list[AlgoSpec]:
                                             P(lookback=756, skip=21, top_n=8)])
     lib += _variants("relative_vol_regime", [P(window=20, ref_window=252), P(window=10, ref_window=252),
                                              P(window=60, ref_window=504)])
+
+    # ── round 3: sector classification and liquidity data ────────────────────────
+    lib += _variants("sector_momentum", [P(lookback=126, top_k=2, skip=21), P(lookback=252, top_k=2, skip=21),
+                                         P(lookback=126, top_k=3, skip=21), P(lookback=63, top_k=2, skip=5)])
+    lib += _variants("illiquidity_rank", [P(window=252, top_n=5), P(window=252, top_n=8), P(window=126, top_n=8)])
 
     names = [a.name for a in lib]
     if len(names) != len(set(names)):

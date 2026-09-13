@@ -28,6 +28,7 @@ def _market(n: int = 320, tickers=("AAA", "BBB", "CCC", "DDD"), seed: int = 0) -
         m.attach_extra(name, pd.Series(50 * np.cumprod(1 + rng.normal(0, 0.01, n)), index=idx))
     m.dividends = pd.DataFrame(0.0, index=idx, columns=close.columns)
     m.dividends.iloc[min(60, n - 1), 0] = 1.0
+    m.meta["sectors"] = {t: ("a" if i % 2 == 0 else "b") for i, t in enumerate(tickers)}
     return m
 
 
