@@ -69,25 +69,26 @@ def main() -> None:
     res = run_batch(specs, market, cfg, n_jobs=args.n_jobs, progress=progress)
     s = res.summary
     print(f"\nDone in {time.time() - t0:.1f}s. {s['n_algorithms']} algorithms, {s['n_failed']} failed.")
-    print("\n-- Batch verdict ---------------------------------------")
-    print(f"  Expected max Sharpe under H0 (N={s['n_algorithms']}): {s['expected_max_sharpe']:.2f}"
+    print("\n-- Batch verdict (all statistics on returns in EXCESS of equal-weight buy-and-hold) --")
+    print(f"  Benchmark Sharpe (buy & hold): {s['benchmark_sharpe']:.2f}")
+    print(f"  Expected max excess Sharpe under H0 (N={s['n_algorithms']}): {s['expected_max_sharpe']:.2f}"
           f"   observed max: {s['observed_max_sharpe']:.2f}")
     print(f"  White's Reality Check p-value:  {s['reality_check_p']:.4f}   (best: {s['reality_check_best']})")
     print(f"  Probability of Backtest Overfitting (CSCV): {s['pbo']:.2f}  over {s['pbo_combinations']} splits")
     print(f"  IS/OOS Sharpe rank correlation: {s['is_oos_rank_corr']}")
     print(f"  Strong edges: {s['n_strong']}   candidates: {s['n_candidate']}   "
           f"random controls flagged strong: {s['n_random_controls_strong']}")
-    print(f"  Best in-sample: {s['best_is_name']}  IS Sharpe {s['best_is_sharpe_is']:.2f} -> OOS Sharpe {s['best_is_oos_sharpe']:.2f}")
+    print(f"  Best in-sample: {s['best_is_name']}  IS excess Sharpe {s['best_is_sharpe_is']:.2f} -> OOS {s['best_is_oos_sharpe']:.2f}")
     if s["best_is_consistent_with_luck"]:
         print("  => The best result is consistent with luck given the number of trials.")
     else:
         print("  => The best result is NOT explained by selection alone.")
 
-    cols = ["family", "sharpe_is", "sharpe_oos", "sharpe_full", "cagr_full", "max_drawdown_full", "n_trades",
+    cols = ["family", "excess_sharpe_is", "excess_sharpe_oos", "sharpe_full", "cagr_full", "max_drawdown_full", "n_trades",
             "p_value", "p_fdr", "dsr", "stability", "edge"]
     import pandas as pd
     with pd.option_context("display.width", 220, "display.max_columns", 30):
-        print("\n-- Leaderboard (sorted by in-sample Sharpe) ------------")
+        print("\n-- Leaderboard (sorted by in-sample excess Sharpe) -----")
         print(res.leaderboard[cols].head(args.top).round(3).to_string())
     if res.errors:
         print("\nErrors:")

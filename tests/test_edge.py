@@ -233,3 +233,13 @@ def test_benchmark_columns_and_summary_fields():
     # absolute Sharpe stays high while excess Sharpe is near zero
     assert rep.leaderboard["sharpe_full"].mean() > 1.0
     assert abs(rep.leaderboard["excess_sharpe_full"].mean()) < 0.5
+
+
+def test_pbo_ignores_constant_excess_columns():
+    # A column identical to the benchmark has zero excess return everywhere. It must
+    # not be allowed to "win" every in-sample split and drive PBO to zero.
+    r, market = _bull_market(n=12)
+    r[:, 0] = market                      # exact benchmark clone
+    rep = assess(_frame(r), benchmark=_bench_series(market), n_boot=100, seed=0)
+    assert 0.3 < rep.summary["pbo"] < 0.8
+    assert rep.summary["pbo_excluded_constant"] == 1

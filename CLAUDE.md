@@ -1,8 +1,9 @@
 # portfolio-sim
 
-Quantitative trading research platform: data ingestion, backtesting, simulated
-execution, risk analysis, significance testing, parameter sweeps, and a local web
-platform with interactive reports.
+Quantitative trading research platform: OHLCV data ingestion, backtesting with stops,
+simulated execution, risk analysis, significance testing, an algorithm lab that
+mass-tests 100+ algorithms with multiple-testing corrections, parameter sweeps, and a
+local web platform with interactive reports.
 
 ## Tech Stack
 
@@ -17,17 +18,18 @@ platform with interactive reports.
 
 ```
 portfolio-sim/
-├── data/                # loader.py (yfinance + parquet cache), lseg.py, cache/ (gitignored)
-├── backtesting/         # engine.py, portfolio.py, metrics.py, trades.py (round trips)
-├── execution/           # order.py, fill.py (slippage + commission)
+├── data/                # loader.py (closes), market.py (MarketData OHLCV), lseg.py, cache/ (gitignored)
+├── backtesting/         # engine.py (lag, rebalance, stops), portfolio.py, metrics.py, trades.py
+├── execution/           # order.py, fill.py
 ├── evaluation/          # evaluator.py, significance.py, serialize.py, reporter.py, html_reporter.py
+├── strategies/          # base.py, _util.py, technical/volume/cross_sectional/calendar/regime/random_control.py
+├── research/            # library.py (116 AlgoSpecs), edge.py (FDR/DSR/RC/PBO), batch.py, report.py
+├── optimization/        # sweep.py, efficient_frontier.py, rebalancing.py
 ├── pipeline/            # pipeline.py — Pipeline.run().evaluate().report(); to_dict()
 ├── risk/                # var.py, drawdown.py, correlation.py
-├── strategies/          # base.py + buy_and_hold, equal_weight, momentum, mean_reversion
-├── optimization/        # sweep.py (grid_search), efficient_frontier.py, rebalancing.py
-├── web/                 # app.py (FastAPI), store.py (RunStore), registry.py, static/
-├── scripts/             # serve.py, run_pipeline.py, run_sweep.py, fetch_data.py, ...
-├── reports/             # generated output; reports/runs/ holds platform runs (gitignored)
+├── web/                 # app.py (FastAPI), store.py (JsonStore/RunStore), registry.py, static/
+├── scripts/             # serve.py, run_batch.py, run_pipeline.py, run_sweep.py, fetch_data.py, ...
+├── reports/             # generated; reports/runs/ and reports/batches/ are gitignored
 └── tests/
 ```
 
@@ -36,47 +38,49 @@ portfolio-sim/
 ```bash
 pip install -r requirements.txt
 python scripts/serve.py                      # platform at http://127.0.0.1:8000
-python scripts/run_pipeline.py --strategy momentum --param lookback=120 --param top_n=2 \
-    --tickers AAPL MSFT --benchmark SPY --start 2018-01-01 --end 2024-12-31 --output reports/momentum
-python scripts/run_sweep.py --strategy momentum --tickers AAPL MSFT --grid lookback=20,60,120 --grid top_n=1,2
-pytest tests/
+python scripts/run_batch.py --tickers AAPL MSFT NVDA --start 2015-01-01 --n-jobs 0 --output reports/batches/demo
+python scripts/run_pipeline.py --strategy momentum --param lookback=120 --tickers AAPL MSFT --benchmark SPY
+python scripts/run_sweep.py --strategy momentum --tickers AAPL MSFT --grid lookback=20,60,120
+pytest tests/                                # ~1 minute; batch tests use n_jobs=1 and tiny n_boot
 ```
 
 ## Conventions
 
 - Strategies subclass `strategies/base.py:Strategy`, set `name`, and implement
-  `generate_signals(data) -> pd.DataFrame` of `{-1, 0, 1}` aligned to `data`.
-  Constructor kwargs must be typed with defaults — `web/registry.py` introspects them
-  to build the UI form and to coerce API parameters.
+  `generate_signals(close) -> DataFrame` of `{-1, 0, 1}`. Strategies needing OHLCV
+  override `generate_signals_market(market)` and set `requires`. Constructor kwargs
+  must be typed with defaults; `web/registry.py` introspects them for the UI and API.
+  Register new families in the module's `*_FAMILIES` list (feeds `strategies.ALL_FAMILIES`).
+- Use `strategies/_util.py` helpers: `state_signals(long_mask)` for "in/out" strategies,
+  `enter_exit_signals(enter, exit)` for event strategies. Never emit NaN signals.
 - Engine semantics: fresh `1` opens or (with `rebalance=True`) resizes to target weight;
-  fresh `-1` closes; unchanged signal does nothing. `execution_lag=1` is the default
-  (fill at next close). Tests that need same-bar fills set `execution_lag=0`.
-- Backtest results are `BacktestResult` dataclasses; evaluated results are
-  `BacktestReport`. Never pass raw dicts between stages.
-- `evaluation/serialize.py:report_to_dict` is the single JSON contract consumed by
-  `web/static/report.js`, `RunStore` and `HTMLReporter`. Add new fields there and
-  render them in `report.js`; do not fork the schema.
-- `web/static/report.js` is shared by the platform page and the standalone
-  `report.html`. Charts read colours from CSS custom properties in `style.css`
-  (light + dark tokens). Never hardcode chart colours in JS.
-- Data paths are resolved relative to the project root with `pathlib`. Never hardcode absolute paths.
-- Risk metrics operate on return series, not prices.
-- Dates are timezone-aware UTC internally; localise only at the output layer.
-- Monetary values are `float`; no currency conversion.
-- Significance analysis is deterministic (`seed`); tests use small `n_samples`.
-
-## Adding a New Strategy
-
-1. Create `strategies/<name>.py` subclassing `Strategy` with typed `__init__` kwargs.
-2. Register it in `strategies/__init__.py` and `web/registry.py:STRATEGY_CLASSES`.
-3. Add at least one test in `tests/test_strategies.py`.
+  fresh `-1` closes; unchanged signal does nothing. `execution_lag=1` default. Stops
+  are evaluated on the close before signals; fills carry a `reason`.
+- **Algorithm lab rules (anti-overfitting):** parameters in `research/library.py` are
+  fixed a priori — never tune them on data and add them back. Every edge statistic in
+  `research/edge.py` runs on returns *in excess of equal-weight buy-and-hold* of the
+  same universe with the same costs. Random-control algorithms must never come out
+  `strong`; if they do, the framework is broken, not the market. Keep `n_boot`
+  small in tests.
+- Backtest results are `BacktestResult`; evaluated results are `BacktestReport`;
+  batches are `BatchResult`. Never pass raw dicts between stages.
+- `evaluation/serialize.py:report_to_dict` and `research/report.py:batch_to_dict` are
+  the JSON contracts consumed by `web/static/report.js` / `batch.js`, the stores and the
+  HTML reporters. Add fields there and render them in the JS; do not fork schemas.
+- Charts read colours from CSS custom properties in `style.css` (light + dark tokens);
+  never hardcode chart colours in JS.
+- Data paths are resolved relative to the project root with `pathlib`. Dates are UTC
+  internally. Monetary values are `float`.
 
 ## Testing notes
 
-- Web tests patch `pipeline.pipeline.fetch_prices` (imported at module level in the
-  pipeline) to avoid network access.
+- Web tests patch `pipeline.pipeline.fetch_prices` and `web.app.fetch_market_data`.
+- `tests/test_families.py` runs every family on synthetic OHLCV; `tests/test_library.py`
+  runs every one of the 116 algorithms through the engine.
+- `tests/test_edge.py` calibrates the mathematics on planted-edge vs pure-noise and
+  bull-market-beta matrices; keep those invariants when changing `edge.py`.
 - Chrome headless (`chrome.exe --headless=new --screenshot`) is a quick way to eyeball
-  a generated `report.html`.
+  a generated `report.html` / `batch.html`.
 
 ## Not In Scope (yet)
 
@@ -84,4 +88,4 @@ pytest tests/
 - Options / derivatives pricing
 - Machine learning signal generation
 - Multi-currency portfolios
-- Authentication / multi-user deployment
+- Parameter optimisation inside the lab (by design), authentication / multi-user

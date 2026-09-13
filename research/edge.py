@@ -321,7 +321,14 @@ def assess(
     psr = _psr(x, 0.0)
     dsr = deflated_sharpe_ratio(x)
     rc = reality_check(x, n_boot=n_boot, seed=seed)
-    pbo = pbo_cscv(x, n_blocks=pbo_blocks) if t >= 2 * pbo_blocks and n >= 2 else {"pbo": float("nan"), "logits": np.array([]), "n_combinations": 0}
+    # Columns with constant excess return (e.g. the benchmark itself) carry no
+    # information about selection and would trivially win every IS split.
+    informative = x.std(axis=0, ddof=1) > 0
+    x_pbo = x[:, informative]
+    if t >= 2 * pbo_blocks and x_pbo.shape[1] >= 2:
+        pbo = pbo_cscv(x_pbo, n_blocks=pbo_blocks)
+    else:
+        pbo = {"pbo": float("nan"), "logits": np.array([]), "n_combinations": 0}
     stab = block_stability(x, k=5)
     min_trl = np.array([min_track_record_length(x[:, j]) for j in range(n)])
 
@@ -374,6 +381,7 @@ def assess(
         "reality_check_observed": float(rc["observed_max"]),
         "pbo": float(pbo["pbo"]),
         "pbo_combinations": int(pbo["n_combinations"]),
+        "pbo_excluded_constant": int((~informative).sum()),
         "n_strong": int((edge == "strong").sum()),
         "n_candidate": int((edge == "candidate").sum()),
         "n_fdr_5pct": int((p_fdr < 0.05).sum()),
