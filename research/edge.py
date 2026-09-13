@@ -315,6 +315,7 @@ def assess(
     seed: int = 0,
     pbo_blocks: int = 16,
     min_trades: int = 20,
+    prior_trials: int = 0,
 ) -> EdgeReport:
     """Rank N algorithms and decide which have an edge after multiple-testing corrections.
 
@@ -329,6 +330,9 @@ def assess(
         is_fraction: Share of days used as in-sample for the IS/OOS split.
         n_boot: Bootstrap samples for the Reality Check.
         pbo_blocks: Blocks for CSCV (even; 16 -> 12 870 combinations).
+        prior_trials: Algorithms tried in earlier rounds or configurations that are not
+            in this matrix. They are added to N for the Deflated Sharpe Ratio and
+            E[max SR] so a multi-round search cannot forget its own history.
     """
     if len(returns) < MIN_DAYS:
         raise ValueError(f"Need at least {MIN_DAYS} days of returns, got {len(returns)}")
@@ -354,8 +358,9 @@ def assess(
     t_stat = np.nan_to_num(t_stat)
     p_one = np.where(t_stat > 0, np.nan_to_num(p_two, nan=1.0) / 2, 1 - np.nan_to_num(p_two, nan=1.0) / 2)
 
+    n_trials = n + max(int(prior_trials), 0)
     psr = _psr(x, 0.0)
-    dsr = deflated_sharpe_ratio(x)
+    dsr = deflated_sharpe_ratio(x, n_trials=n_trials)
     rc = reality_check(x, n_boot=n_boot, seed=seed)
     # Columns with constant excess return (e.g. the benchmark itself) carry no
     # information about selection and would trivially win every IS split.
@@ -382,7 +387,11 @@ def assess(
     ja_is = jensen_alpha(r_is, b[:split])
     ja_oos = jensen_alpha(r_oos, b[split:])
     p_alpha_fdr = benjamini_hochberg(ja["p_value"])
-    alpha_strong = (p_alpha_fdr < 0.05) & (ja_oos["alpha_daily"] > 0) & (ja_is["alpha_daily"] > 0) & enough_trades
+    # Stability of the beta-adjusted residual across 5 contiguous blocks
+    resid = r - b[:, None] * ja["beta"][None, :]
+    alpha_stab = block_stability(resid, k=5)["stability"].to_numpy()
+    alpha_strong = ((p_alpha_fdr < 0.05) & (ja_oos["alpha_daily"] > 0) & (ja_is["alpha_daily"] > 0)
+                    & (alpha_stab >= 0.6) & enough_trades)
     alpha_candidate = ~alpha_strong & (p_alpha_fdr < 0.10) & (ja_oos["alpha_daily"] > 0) & enough_trades
     alpha_edge = np.where(alpha_strong, "strong", np.where(alpha_candidate, "candidate", "none"))
 
@@ -402,7 +411,8 @@ def assess(
         "min_trl": min_trl, "n_trades": trades, "edge": edge,
         "alpha_ann": ja["alpha_daily"] * TRADING_DAYS, "alpha_t": ja["t_stat"], "p_alpha": ja["p_value"],
         "p_alpha_fdr": p_alpha_fdr, "alpha_is_ann": ja_is["alpha_daily"] * TRADING_DAYS,
-        "alpha_oos_ann": ja_oos["alpha_daily"] * TRADING_DAYS, "beta": ja["beta"], "alpha_edge": alpha_edge,
+        "alpha_oos_ann": ja_oos["alpha_daily"] * TRADING_DAYS, "beta": ja["beta"], "alpha_stability": alpha_stab,
+        "alpha_edge": alpha_edge,
     }, index=pd.Index(names, name="algorithm"))
     lb = lb.sort_values(["excess_sharpe_is"], ascending=False, kind="stable")
 
@@ -421,7 +431,8 @@ def assess(
         "is_fraction": float(is_fraction),
         "benchmark_sharpe": benchmark_sharpe,
         "has_benchmark": benchmark is not None,
-        "expected_max_sharpe": float(expected_max_sharpe(n, var_sr) * math.sqrt(TRADING_DAYS)),
+        "n_trials": int(n_trials),
+        "expected_max_sharpe": float(expected_max_sharpe(n_trials, var_sr) * math.sqrt(TRADING_DAYS)),
         "observed_max_sharpe": float(ex_full.max()),
         "observed_max_abs_sharpe": float(full["sharpe"].max()),
         "reality_check_p": float(rc["p_value"]),

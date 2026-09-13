@@ -293,3 +293,70 @@ def test_default_market_dispatch_uses_close():
     market = MarketData.from_close(close)
     result = BacktestEngine(_cfg0()).run(AlwaysBuyStrategy(), close, market=market)
     assert len(result.trades) == 1
+
+
+# ── active sizing: spread capital across the names actually held ───────────
+
+class TopTwoStrategy(Strategy):
+    """Long AAA and BBB from bar 0, never CCC/DDD (a cross-sectional top-N pattern)."""
+
+    name = "top_two"
+
+    def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+        sig = pd.DataFrame(-1, index=data.index, columns=data.columns)
+        sig[["AAA", "BBB"]] = 1
+        return sig
+
+
+def test_fixed_sizing_leaves_cash_for_unheld_names():
+    prices = _prices(5, ["AAA", "BBB", "CCC", "DDD"])
+    cfg = _cfg0()
+    result = BacktestEngine(cfg).run(TopTwoStrategy(), prices)
+    # 1/4 weight each -> 2 names -> half the capital invested
+    assert result.trades["value"].sum() == pytest.approx(5_000.0, rel=0.01)
+
+
+def test_active_sizing_invests_across_held_names():
+    prices = _prices(5, ["AAA", "BBB", "CCC", "DDD"])
+    cfg = _cfg0()
+    cfg.sizing = "active"
+    result = BacktestEngine(cfg).run(TopTwoStrategy(), prices)
+    # 2 active longs -> 1/2 weight each -> (almost) fully invested
+    assert result.trades["value"].sum() == pytest.approx(10_000.0, rel=0.01)
+    assert (result.trades["quantity"] == 50.0).all()
+
+
+def test_active_sizing_respects_max_weight():
+    prices = _prices(5, ["AAA", "BBB", "CCC", "DDD"])
+    cfg = _cfg0()
+    cfg.sizing = "active"
+    cfg.max_weight = 0.3
+    result = BacktestEngine(cfg).run(TopTwoStrategy(), prices)
+    assert result.trades["value"].sum() == pytest.approx(6_000.0, rel=0.01)
+
+
+def test_active_sizing_rebalances_when_active_set_changes():
+    """AAA long from bar 0; BBB joins at bar 2 -> AAA is trimmed to 1/2 on the fresh signal."""
+    class JoinStrategy(Strategy):
+        name = "join"
+
+        def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+            sig = pd.DataFrame(-1, index=data.index, columns=data.columns)
+            sig["AAA"] = 1
+            sig.loc[sig.index[2]:, "BBB"] = 1
+            return sig
+
+    prices = _prices(6, ["AAA", "BBB"])
+    cfg = _cfg0()
+    cfg.sizing = "active"
+    result = BacktestEngine(cfg).run(JoinStrategy(), prices)
+    aaa = result.trades[result.trades["ticker"] == "AAA"]
+    assert aaa["quantity"].iloc[0] == 100.0                       # alone: 100% -> 100 shares @100
+    trims = aaa[aaa["direction"] == -1]
+    assert len(trims) == 1 and trims["reason"].iloc[0] == "rebalance"
+    assert trims["quantity"].iloc[0] == 50.0                      # down to 50% weight
+
+
+def test_invalid_sizing_rejected():
+    with pytest.raises(ValueError, match="sizing"):
+        BacktestConfig(start="2023-01-01", end="2023-02-01", sizing="magic")

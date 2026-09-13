@@ -78,6 +78,8 @@ class BatchRequest(BaseModel):
     min_trades: int = Field(default=20, ge=0)
     n_jobs: int = Field(default=1, ge=0, le=64)
     data_source: str = "yfinance"
+    sizing: str = "fixed"
+    prior_trials: int = Field(default=0, ge=0)
 
 
 def _load_market(tickers: list[str], start: str, end: str, data_source: str) -> MarketData:
@@ -229,6 +231,7 @@ def create_app(store: RunStore | None = None, batch_store: BatchStore | None = N
             start=req.start, end=req.end, initial_capital=req.initial_capital, commission=req.commission,
             slippage_bps=req.slippage_bps, execution_lag=req.execution_lag, rebalance=req.rebalance,
             is_fraction=req.is_fraction, n_boot=req.n_boot, pbo_blocks=req.pbo_blocks, min_trades=req.min_trades,
+            sizing=req.sizing, prior_trials=req.prior_trials,
         )
         try:
             result = run_batch(specs, market, cfg, n_jobs=req.n_jobs)

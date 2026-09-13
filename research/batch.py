@@ -33,13 +33,15 @@ class BatchConfig:
     seed: int = 0
     pbo_blocks: int = 16
     min_trades: int = 20
+    sizing: str = "fixed"          # see BacktestConfig.sizing
+    prior_trials: int = 0          # algorithms tried in earlier rounds/configurations, added to N
 
     def engine_config(self) -> BacktestConfig:
         return BacktestConfig(
             start=self.start, end=self.end, initial_capital=self.initial_capital,
             commission=self.commission, slippage=self.slippage_bps / 10_000,
             execution_lag=self.execution_lag, rebalance=self.rebalance,
-            max_weight=self.max_weight, risk_free_rate=self.risk_free_rate,
+            max_weight=self.max_weight, risk_free_rate=self.risk_free_rate, sizing=self.sizing,
         )
 
 
@@ -150,6 +152,7 @@ def run_batch(
     edge = assess(
         returns, n_trades=n_trades, benchmark=benchmark, is_fraction=config.is_fraction,
         n_boot=config.n_boot, seed=config.seed, pbo_blocks=config.pbo_blocks, min_trades=config.min_trades,
+        prior_trials=config.prior_trials,
     )
 
     by_name = {s.name: s for s in specs}

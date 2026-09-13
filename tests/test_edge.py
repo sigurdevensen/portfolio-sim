@@ -297,3 +297,26 @@ def test_assess_alpha_edge_detects_timing_alpha_despite_negative_excess_return()
     assert lb.loc["algo_0", "alpha_edge"] == "strong"          # but has genuine beta-adjusted alpha
     assert (lb.drop("algo_0")["alpha_edge"] != "strong").all()
     assert rep.summary["n_alpha_strong"] == 1
+
+
+def test_prior_trials_raise_expected_max_and_lower_dsr():
+    r = _planted(n=20)
+    a = assess(_frame(r), n_boot=100, seed=0)
+    b = assess(_frame(r), n_boot=100, seed=0, prior_trials=500)
+    assert b.summary["n_trials"] == 520
+    assert b.summary["expected_max_sharpe"] > a.summary["expected_max_sharpe"]
+    assert b.leaderboard.loc["algo_0", "dsr"] <= a.leaderboard.loc["algo_0", "dsr"]
+
+
+def test_alpha_edge_requires_stability_across_blocks():
+    rng = np.random.default_rng(31)
+    t_ = 1500
+    market = rng.normal(0.001, 0.01, t_)
+    r = np.stack([0.5 * market + rng.normal(0, 0.002, t_) for _ in range(12)], axis=1)
+    # alpha concentrated in the first 40 % of the sample only
+    boost = np.where(np.arange(t_) < int(0.4 * t_), 0.0025, -0.0004)
+    r[:, 0] = 0.5 * market + boost + rng.normal(0, 0.002, t_)
+    n_trades = pd.Series(50, index=[f"algo_{i}" for i in range(12)])
+    rep = assess(_frame(r), benchmark=_bench_series(market), n_trades=n_trades, n_boot=100, seed=0)
+    assert "alpha_stability" in rep.leaderboard.columns
+    assert rep.leaderboard.loc["algo_0", "alpha_edge"] != "strong"

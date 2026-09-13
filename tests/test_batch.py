@@ -128,3 +128,10 @@ def test_batch_dict_carries_benchmark_nav_and_excess_hist():
     d = batch_to_dict(res)
     assert len(d["benchmark_nav"]) == len(d["dates"])
     assert d["excess_sharpe_hist"]["counts"]
+
+
+def test_batch_active_sizing_and_prior_trials():
+    res = run_batch(SPECS, _market(), _cfg(sizing="active", prior_trials=100), n_jobs=1)
+    assert res.summary["n_trials"] == 6 + 100
+    assert res.config.sizing == "active"
+    assert (res.leaderboard["n_fills"] > 0).any()

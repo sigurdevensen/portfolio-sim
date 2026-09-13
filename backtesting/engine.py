@@ -32,12 +32,15 @@ class BacktestConfig:
     rebalance: bool = True         # resize held positions on a fresh long signal
     max_weight: float | None = None  # cap on per-ticker target weight
     risk_free_rate: float = 0.0    # annualised, used for Sharpe/Sortino
+    sizing: str = "fixed"          # "fixed": 1/n_tickers each; "active": 1/n_active_longs each
 
     def __post_init__(self) -> None:
         if self.execution_lag < 0:
             raise ValueError("execution_lag must be >= 0")
         if self.max_weight is not None and not (0 < self.max_weight <= 1):
             raise ValueError("max_weight must be in (0, 1]")
+        if self.sizing not in ("fixed", "active"):
+            raise ValueError("sizing must be 'fixed' or 'active'")
 
 
 class BacktestEngine:
@@ -49,6 +52,12 @@ class BacktestEngine:
       if already held and ``rebalance`` is on, resize to the target weight.
     * ``-1`` when previously not ``-1``: close the position.
     * ``0`` or an unchanged signal: do nothing.
+
+    Sizing: ``fixed`` gives every ticker a target weight of ``1 / n_tickers`` (a
+    top-5-of-36 strategy is then ~86 % cash). ``active`` gives each held name
+    ``1 / n_active`` where ``n_active`` is the number of tickers whose current signal
+    is ``1``; when that count changes, held positions are rebalanced to the new
+    weight, so cross-sectional strategies stay (near) fully invested.
 
     Stops (``strategy.stop_loss`` / ``take_profit`` / ``trailing_stop``) are
     evaluated on each bar close before signals and exit the whole position. After a
@@ -91,9 +100,11 @@ class BacktestEngine:
         fill_sim = FillSimulator(slippage=self.config.slippage, commission_rate=self.config.commission)
 
         tickers = prices_in_range.columns.tolist()
-        weight = 1.0 / len(tickers)
+        fixed_weight = 1.0 / len(tickers)
         if self.config.max_weight is not None:
-            weight = min(weight, self.config.max_weight)
+            fixed_weight = min(fixed_weight, self.config.max_weight)
+        active = self.config.sizing == "active"
+        prev_n_active = 0
 
         stop_loss = getattr(strategy, "stop_loss", None)
         take_profit = getattr(strategy, "take_profit", None)
@@ -132,6 +143,27 @@ class BacktestEngine:
 
             nav = portfolio.market_value(valid_prices)
             current = signals.loc[date]
+
+            if active:
+                n_active = int(sum(1 for t in tickers if t in valid_prices and int(current[t]) == 1))
+                weight = 1.0 / n_active if n_active else 0.0
+                if self.config.max_weight is not None:
+                    weight = min(weight, self.config.max_weight)
+                # The active set changed: resize every held name that stays long.
+                if self.config.rebalance and n_active != prev_n_active:
+                    for ticker, pos in list(portfolio.positions.items()):
+                        if ticker not in valid_prices or int(current[ticker]) != 1 or int(prior[ticker]) != 1:
+                            continue
+                        price = valid_prices[ticker]
+                        target_shares = self._target_shares(nav * weight, price, fill_sim)
+                        delta = target_shares - pos.shares
+                        if delta < 0:
+                            self._sell(portfolio, fill_sim, fills_log, ticker, -delta, price, date, "rebalance")
+                        elif delta > 0:
+                            self._buy(portfolio, fill_sim, fills_log, ticker, delta, price, date, "rebalance")
+                prev_n_active = n_active
+            else:
+                weight = fixed_weight
 
             for ticker in tickers:
                 if ticker not in valid_prices:
