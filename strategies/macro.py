@@ -83,7 +83,7 @@ class MacroBetaRotation(Strategy):
     def generate_signals_market(self, market: MarketData) -> pd.DataFrame:
         s = _series(market, self.series)
         sr = s.pct_change()
-        rets = market.close.pct_change()
+        rets = market.close.pct_change(fill_method=None)
         cov = rets.rolling(self.beta_window, min_periods=self.beta_window).cov(sr)
         var = sr.rolling(self.beta_window, min_periods=self.beta_window).var()
         beta = cov.div(var.replace(0, np.nan), axis=0)
@@ -107,7 +107,7 @@ class CrossAssetAgreement(Strategy):
     def generate_signals_market(self, market: MarketData) -> pd.DataFrame:
         a = _series(market, self.series_a).pct_change(self.mom_window)
         b = _series(market, self.series_b).pct_change(self.mom_window)
-        own = market.close.pct_change(self.mom_window)
+        own = market.close.pct_change(self.mom_window, fill_method=None)
         macro_ok = (a > 0) & (b > 0)
         long = own.gt(0) & pd.DataFrame(np.repeat(macro_ok.to_numpy()[:, None], own.shape[1], axis=1),
                                         index=own.index, columns=own.columns)
@@ -127,7 +127,7 @@ class RelativeToIndex(Strategy):
 
     def generate_signals_market(self, market: MarketData) -> pd.DataFrame:
         idx_ret = _series(market, self.series).pct_change(self.window)
-        own = market.close.pct_change(self.window)
+        own = market.close.pct_change(self.window, fill_method=None)
         long = own.gt(idx_ret, axis=0)
         return state_signals(long, valid=own.notna() & idx_ret.notna().to_numpy()[:, None])
 

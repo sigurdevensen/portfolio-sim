@@ -36,7 +36,9 @@ DATA_TYPES: dict[str, str] = {
     "cross_asset_agreement": "macro", "relative_to_index": "macro", "index_dip_buy": "macro",
     "vix_spike_reversal": "macro", "us_lead_lag": "macro",
     # corporate actions
-    "dividend_capture": "events", "post_dividend_reversal": "events",
+    "dividend_capture": "events", "post_dividend_reversal": "events", "dividend_yield_rank": "events",
+    # documented anomalies
+    "low_beta_rank": "macro", "long_term_reversal": "cross_sectional", "relative_vol_regime": "price",
 }
 
 
@@ -223,6 +225,17 @@ def _build_oslo_library() -> list[AlgoSpec]:
     lib += _variants("sell_in_may", [P(long_months="3,4,5"), P(long_months="2,5,8,11"), P(long_months="12,1,2,3,4,5")])
     # Short-term reversal (price only, but new)
     lib += _variants("weekly_reversal", [P(lookback=5, top_n=3), P(lookback=5, top_n=5), P(lookback=10, top_n=5)])
+
+    # ── round 2: documented anomalies (added after round 1; N grows accordingly) ──
+    lib += _variants("dividend_yield_rank", [P(window=252, top_n=5), P(window=252, top_n=8), P(window=504, top_n=8)])
+    lib += _variants("low_beta_rank", [P(series="obx", window=252, top_n=5, direction=1),
+                                       P(series="obx", window=252, top_n=8, direction=1),
+                                       P(series="obx", window=126, top_n=8, direction=1),
+                                       P(series="obx", window=252, top_n=8, direction=-1)])   # high-beta control
+    lib += _variants("long_term_reversal", [P(lookback=756, skip=21, top_n=5), P(lookback=504, skip=21, top_n=5),
+                                            P(lookback=756, skip=21, top_n=8)])
+    lib += _variants("relative_vol_regime", [P(window=20, ref_window=252), P(window=10, ref_window=252),
+                                             P(window=60, ref_window=504)])
 
     names = [a.name for a in lib]
     if len(names) != len(set(names)):

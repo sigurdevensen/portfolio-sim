@@ -64,7 +64,7 @@ class WeeklyReversal(Strategy):
         self.lookback, self.top_n = lookback, top_n
 
     def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
-        ret = data.pct_change(self.lookback)
+        ret = data.pct_change(self.lookback, fill_method=None)
         rank = ret.rank(axis=1, ascending=True, method="first")   # 1 = biggest loser
         return state_signals(rank <= self.top_n, valid=ret.notna())
 

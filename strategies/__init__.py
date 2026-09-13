@@ -1,3 +1,4 @@
+from .anomalies import ANOMALY_FAMILIES, DividendYieldRank, LongTermReversal, LowBetaRank, RelativeVolRegime
 from .base import Strategy
 from .buy_and_hold import BuyAndHold
 from .calendar import CALENDAR_FAMILIES, DayOfWeek, SellInMay, TurnOfMonth
@@ -48,7 +49,7 @@ from .volume import VOLUME_FAMILIES, OBVTrend, VolumeBreakout, VolumeZReversal
 ALL_FAMILIES: list[type[Strategy]] = [
     BuyAndHold, EqualWeight, Momentum, MeanReversion,
     *TECHNICAL_FAMILIES, *VOLUME_FAMILIES, *CROSS_SECTIONAL_FAMILIES,
-    *CALENDAR_FAMILIES, *REGIME_FAMILIES, *MACRO_FAMILIES, *EVENT_FAMILIES, *RANDOM_FAMILIES,
+    *CALENDAR_FAMILIES, *REGIME_FAMILIES, *MACRO_FAMILIES, *EVENT_FAMILIES, *ANOMALY_FAMILIES, *RANDOM_FAMILIES,
 ]
 
 __all__ = [
@@ -64,5 +65,6 @@ __all__ = [
     "MacroTrendFilter", "MacroLevelRegime", "MacroBetaRotation", "CrossAssetAgreement",
     "RelativeToIndex", "IndexDipBuy", "VIXSpikeReversal", "USLeadLag",
     "DividendCapture", "PostDividendReversal", "WeeklyReversal",
+    "DividendYieldRank", "LowBetaRank", "LongTermReversal", "RelativeVolRegime",
     "RandomSignal",
 ]

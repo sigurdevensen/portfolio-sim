@@ -175,3 +175,64 @@ def test_weekly_reversal_longs_biggest_losers():
     sig = WeeklyReversal(lookback=5, top_n=1).generate_signals(close)
     assert (sig["LOSER"].iloc[6:] == 1).all()
     assert (sig["WINNER"].iloc[6:] == -1).all()
+
+
+# ── round 2: documented anomalies ──────────────────────────────────────────
+
+from strategies.anomalies import ANOMALY_FAMILIES, DividendYieldRank, LongTermReversal, LowBetaRank, RelativeVolRegime
+
+
+@pytest.mark.parametrize("cls", ANOMALY_FAMILIES, ids=lambda c: c.name)
+def test_anomaly_families_emit_valid_signals_and_are_registered(cls):
+    m = _market(n=600)
+    sig = cls().generate_signals_market(m)
+    assert sig.shape == m.close.shape
+    assert set(np.unique(sig.to_numpy())).issubset({-1, 0, 1})
+    assert cls in ALL_FAMILIES
+
+
+def test_dividend_yield_rank_prefers_highest_yielder():
+    m = _market(n=400)
+    m.close.loc[:, :] = 100.0
+    m.dividends.loc[:, :] = 0.0
+    m.dividends.iloc[50, 0] = 8.0     # AAA yields 8 %
+    m.dividends.iloc[50, 1] = 2.0     # BBB yields 2 %
+    sig = DividendYieldRank(window=252, top_n=1).generate_signals_market(m)
+    assert (sig["AAA"].iloc[260:300] == 1).all()
+    assert (sig["BBB"].iloc[260:300] == -1).all()
+    assert (sig["CCC"].iloc[260:300] == -1).all()   # non-payer never selected
+
+
+def test_low_beta_rank_selects_low_beta_name():
+    rng = np.random.default_rng(4)
+    n = 500
+    idx = pd.date_range("2021-01-04", periods=n, freq="B", tz="UTC")
+    mkt = rng.normal(0.0003, 0.01, n)
+    m = MarketData.from_close(pd.DataFrame({
+        "HIGHB": 100 * np.cumprod(1 + 1.6 * mkt + rng.normal(0, 0.003, n)),
+        "LOWB": 100 * np.cumprod(1 + 0.2 * mkt + rng.normal(0, 0.003, n)),
+    }, index=idx))
+    m.attach_extra("obx", pd.Series(1000 * np.cumprod(1 + mkt), index=idx))
+    sig = LowBetaRank(window=252, top_n=1).generate_signals_market(m)
+    assert (sig["LOWB"].iloc[260:] == 1).all()
+    inv = LowBetaRank(window=252, top_n=1, direction=-1).generate_signals_market(m)
+    assert (inv["HIGHB"].iloc[260:] == 1).all()
+
+
+def test_long_term_reversal_longs_multi_year_loser():
+    n = 900
+    idx = pd.date_range("2020-01-01", periods=n, freq="B", tz="UTC")
+    close = pd.DataFrame({"LOSER": np.linspace(100, 40, n), "WINNER": np.linspace(100, 300, n), "FLAT": 100.0}, index=idx)
+    sig = LongTermReversal(lookback=756, skip=21, top_n=1).generate_signals(close)
+    assert (sig["LOSER"].iloc[760:] == 1).all()
+    assert (sig["WINNER"].iloc[760:] == -1).all()
+
+
+def test_relative_vol_regime_out_when_vol_elevated():
+    rng = np.random.default_rng(9)
+    n = 700
+    idx = pd.date_range("2020-01-01", periods=n, freq="B", tz="UTC")
+    vol = np.where(np.arange(n) < 600, 0.005, 0.05)
+    close = pd.DataFrame({"AAA": 100 * np.cumprod(1 + rng.normal(0, 1, n) * vol)}, index=idx)
+    sig = RelativeVolRegime(window=20, ref_window=252).generate_signals(close)
+    assert (sig["AAA"].iloc[640:] == -1).all()
