@@ -119,3 +119,60 @@ def test_report_saves_charts(tmp_path):
     assert (tmp_path / "nav_curve.png").exists()
     assert (tmp_path / "drawdown.png").exists()
     assert (tmp_path / "returns_dist.png").exists()
+
+
+# ── Extended report fields ─────────────────────────────────────────────────
+
+def _make_result_with_trades() -> BacktestResult:
+    result = _make_result()
+    idx = result.nav.index
+    trades = pd.DataFrame([
+        {"date": idx[0], "ticker": "AAA", "direction": 1, "quantity": 10.0, "fill_price": 100.0,
+         "commission": 1.0, "value": 1000.0, "cash_after": 99_000.0},
+        {"date": idx[20], "ticker": "AAA", "direction": -1, "quantity": 10.0, "fill_price": 110.0,
+         "commission": 1.1, "value": 1100.0, "cash_after": 100_098.9},
+    ])
+    return BacktestResult(nav=result.nav, trades=trades)
+
+
+def test_report_contains_round_trips_and_trade_stats():
+    report = Evaluator().evaluate(_make_result_with_trades(), significance=False)
+    assert len(report.round_trips) == 1
+    assert report.trade_stats["n_trades"] == 1
+    assert report.trade_stats["win_rate"] == 1.0
+
+
+def test_report_significance_present_by_default():
+    report = Evaluator().evaluate(_make_result(), n_samples=20)
+    assert report.significance is not None
+    assert report.significance.n_samples == 20
+
+
+def test_report_significance_disabled():
+    report = Evaluator().evaluate(_make_result(), significance=False)
+    assert report.significance is None
+
+
+def test_report_significance_skipped_for_short_series():
+    report = Evaluator().evaluate(_make_result(n=20), n_samples=20)
+    assert report.significance is None
+
+
+def test_monthly_returns_table_shape():
+    report = Evaluator().evaluate(_make_result(), significance=False)
+    mr = report.monthly_returns
+    assert list(mr.columns) == list(range(1, 13))
+    assert 2023 in mr.index
+    # January 2023 return should equal compounded daily returns in January
+    nav = report.result.nav
+    jan = nav[nav.index.month == 1]
+    expected = jan.iloc[-1] / nav.iloc[0] - 1
+    assert mr.loc[2023, 1] == pytest.approx(expected)
+
+
+def test_benchmark_passed_to_evaluate_adds_beta():
+    result = _make_result()
+    bench = result.nav * 1.01
+    report = Evaluator().evaluate(result, benchmark=bench, significance=False)
+    assert "beta" in report.metrics
+    assert report.metrics["beta"] == pytest.approx(1.0, abs=1e-6)
