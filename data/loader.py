@@ -34,7 +34,12 @@ def fetch_prices(
         return pd.read_parquet(cache_path)
 
     raw = yf.download(tickers, start=start, end=end, auto_adjust=True, progress=False)
-    if len(tickers) == 1:
+
+    # yfinance >= 0.2.38 returns a MultiIndex (Price, Ticker); flatten to ticker columns.
+    if isinstance(raw.columns, pd.MultiIndex):
+        prices = raw["Close"].copy()
+        prices.columns = [str(c) for c in prices.columns]
+    elif len(tickers) == 1:
         prices = raw[["Close"]].rename(columns={"Close": tickers[0]})
     else:
         prices = raw["Close"]

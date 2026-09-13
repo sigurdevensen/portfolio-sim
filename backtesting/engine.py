@@ -93,7 +93,10 @@ class BacktestEngine:
                 # No pyramiding: only enter a long if no position currently held
                 if sig == 1 and ticker not in portfolio.positions:
                     target_alloc = nav_start / n_tickers
-                    shares = math.floor(target_alloc / price)
+                    # Include slippage and commission in per-share cost so the
+                    # estimated_cost check never silently rejects a valid order.
+                    cost_per_share = price * (1 + fill_sim.slippage) * (1 + fill_sim.commission_rate)
+                    shares = math.floor(target_alloc / cost_per_share)
                     if shares <= 0:
                         continue
                     order = Order(ticker=ticker, direction=1, quantity=float(shares), timestamp=date)
