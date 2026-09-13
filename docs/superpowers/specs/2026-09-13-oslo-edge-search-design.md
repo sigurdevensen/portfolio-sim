@@ -70,3 +70,21 @@ At least one non-control algorithm with verdict `strong` (p_fdr < 0.05, DSR > 0.
 OOS excess Sharpe > 0, stability >= 0.6, >= 20 trades) on the full Oslo batch. If no
 round achieves it, the honest output is the ranked leaderboard and the statement that
 the search found nothing that survives correction — that result is reported, not hidden.
+
+
+## Results log (all rounds re-run the full library; N accumulates)
+
+| Round | Added | Config | N counted | Excess verdict | Alpha view | Note |
+|---|---|---|---|---|---|---|
+| 1 | base 116 + 60 macro/event | fixed sizing | 176 | none (RC p 0.91) | – | best: monthly equal-weight, excess Sharpe 0.22 |
+| 2 | +13 anomalies (yield, low beta, LT reversal, rel. vol) | fixed | 189 | none (RC p 0.93) | – | no new entrant in top 25 |
+| 3 | +7 (sector momentum, illiquidity) + alpha view | fixed | 196 | none (RC p 0.91) | 3 "strong" | flagged low-beta & illiquidity; diagnostics: 86 % cash, low-beta alpha absent 2020-24 |
+| 4 | active sizing | active, no band | 392 | none (RC p 0.26) | 0 strong | trend strategies churned (28k fills); IS winner +0.76 -> OOS -0.22 |
+| 5 | rebalance band 0.25 | active, band | 588 | none (RC p 0.26) | 2 candidates (p_fdr 0.09) | illiquidity: alpha 12 %/yr, t 3.1, robust to leave-one-out and sub-periods |
+| 6 | +12 (seasonality, MAX, idio vol, volume premium) | active, band | 796 | none (RC p 0.25) | 2 candidates (p_fdr 0.095) | search stopped |
+
+**Conclusion.** No algorithm meets the pre-registered `strong` gate on the Oslo
+universe. The Amihud illiquidity ranking is the only economically meaningful
+candidate; it cannot be separated from survivorship bias with the available data
+(LSEG point-in-time constituents unavailable in this licence) and has very small
+capacity. Reported as a candidate, not as a found edge.

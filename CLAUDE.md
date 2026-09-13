@@ -22,8 +22,8 @@ portfolio-sim/
 ├── backtesting/         # engine.py (lag, rebalance, stops), portfolio.py, metrics.py, trades.py
 ├── execution/           # order.py, fill.py
 ├── evaluation/          # evaluator.py, significance.py, serialize.py, reporter.py, html_reporter.py
-├── strategies/          # base.py, _util.py, technical/volume/cross_sectional/calendar/regime/random_control.py
-├── research/            # library.py (116 AlgoSpecs), edge.py (FDR/DSR/RC/PBO), batch.py, report.py
+├── strategies/          # base.py, _util.py, technical/volume/cross_sectional/calendar/regime/macro/events/anomalies/random_control.py
+├── research/            # library.py (116 + 92 AlgoSpecs), universes.py, edge.py (FDR/DSR/RC/PBO/alpha), batch.py, report.py
 ├── optimization/        # sweep.py, efficient_frontier.py, rebalancing.py
 ├── pipeline/            # pipeline.py — Pipeline.run().evaluate().report(); to_dict()
 ├── risk/                # var.py, drawdown.py, correlation.py
@@ -38,6 +38,7 @@ portfolio-sim/
 ```bash
 pip install -r requirements.txt
 python scripts/serve.py                      # platform at http://127.0.0.1:8000
+python scripts/run_batch.py --universe oslo --n-jobs 0 --sizing active --rebalance-band 0.25 --output reports/batches/oslo
 python scripts/run_batch.py --tickers AAPL MSFT NVDA --start 2015-01-01 --n-jobs 0 --output reports/batches/demo
 python scripts/run_pipeline.py --strategy momentum --param lookback=120 --tickers AAPL MSFT --benchmark SPY
 python scripts/run_sweep.py --strategy momentum --tickers AAPL MSFT --grid lookback=20,60,120
@@ -59,9 +60,17 @@ pytest tests/                                # ~1 minute; batch tests use n_jobs
 - **Algorithm lab rules (anti-overfitting):** parameters in `research/library.py` are
   fixed a priori — never tune them on data and add them back. Every edge statistic in
   `research/edge.py` runs on returns *in excess of equal-weight buy-and-hold* of the
-  same universe with the same costs. Random-control algorithms must never come out
-  `strong`; if they do, the framework is broken, not the market. Keep `n_boot`
+  same universe with the same costs; the Jensen-alpha view is reported alongside, never
+  instead. When a search runs several rounds, pass `prior_trials` so N keeps counting
+  everything tried. Universes in `research/universes.py` are fixed before testing; do
+  not edit a ticker list after seeing results. Random-control algorithms must never come
+  out `strong`; if they do, the framework is broken, not the market. Keep `n_boot`
   small in tests.
+- **Sizing:** use `sizing="active"` with `rebalance_band=0.25` for cross-sectional
+  comparisons (fixed sizing leaves top-N strategies mostly in cash).
+- **Known result (Sept 2026):** on the Oslo universe no algorithm passes the strong gate
+  after 796 trials; the illiquidity ranking is the only robust alpha candidate and
+  carries survivorship and capacity caveats. See README "What the lab found".
 - Backtest results are `BacktestResult`; evaluated results are `BacktestReport`;
   batches are `BatchResult`. Never pass raw dicts between stages.
 - `evaluation/serialize.py:report_to_dict` and `research/report.py:batch_to_dict` are

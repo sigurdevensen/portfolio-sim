@@ -14,7 +14,10 @@ pip install -r requirements.txt
 # 1. Start the platform and open http://127.0.0.1:8000  (tabs: Backtest, Algorithm lab)
 python scripts/serve.py
 
-# 2. Test the whole algorithm library on a universe (parallel) and rank by edge
+# 2. Test the whole algorithm library on a named universe (parallel) and rank by edge
+python scripts/run_batch.py --universe oslo --n-jobs 0 --sizing active --rebalance-band 0.25 \
+    --output reports/batches/oslo
+#    or explicit tickers (price/OHLC/volume/calendar algorithms only):
 python scripts/run_batch.py --tickers AAPL MSFT NVDA AMZN GOOGL META JPM XOM JNJ PG \
     --start 2015-01-01 --end 2024-12-31 --n-jobs 0 --output reports/batches/us10
 
@@ -33,15 +36,22 @@ pytest tests/
 
 ## The algorithm lab (mass testing without fooling yourself)
 
-`research/library.py` holds **116 algorithms** from 29 families, all with parameters
-fixed a priori from textbook defaults (nothing is tuned on the data). Families span
-five data types: price (moving-average crosses, MACD, RSI, Bollinger, momentum, mean
-reversion, volatility regime, dip buying, streak reversal), OHLC (Donchian, Keltner,
-ATR breakouts, stochastic, gap reversal), volume (volume-confirmed breakout, OBV,
-volume-z capitulation), calendar (turn-of-month, day-of-week, sell-in-May) and
-cross-sectional (relative strength, low volatility, dual momentum, 52-week high).
-Some variants add a 10 % stop-loss or a 15 % trailing stop. Five **random-signal
-controls** are included so the framework can be seen to reject noise.
+`research/library.py` holds **116 base algorithms** from 29 families plus **92
+universe-specific algorithms** that need external data (208 for the Oslo universe).
+All parameters are fixed a priori from the literature or textbook defaults; nothing is
+tuned on the data. Data types covered: price, OHLC, volume, calendar, cross-sectional,
+**macro series** (Brent, WTI, USD/NOK, EUR/NOK, VIX, S&P 500, US 10-year, gold, copper,
+gas, OBX, Euro Stoxx 50), **corporate actions** (dividend capture, post-dividend
+reversal, dividend-yield ranking), **sector classification** (industry momentum), and
+documented anomalies (low beta, illiquidity, long-term reversal, same-month
+seasonality, MAX effect, idiosyncratic volatility, high-volume premium). Some
+variants add a 10 % stop-loss or a 15 % trailing stop. Five **random-signal controls**
+are included so the framework can be seen to reject noise.
+
+Named universes live in `research/universes.py` (`oslo`: 36 OSE names with macro
+series, dividends and a sector map; `us10`). `load_universe()` attaches everything to
+one `MarketData`; strategies read `market.extra[...]`, `market.dividends` and
+`market.meta["sectors"]`.
 
 `research/batch.py` backtests every algorithm on the same OHLCV data (process pool),
 producing a `T x N` matrix of daily returns. `research/edge.py` then decides which
@@ -57,10 +67,35 @@ universe with the same costs** (market beta is not skill):
 | Probability of Backtest Overfitting (CSCV) | How often is the in-sample winner below median out of sample? |
 | Block stability, MinTRL | Is the edge consistent across time, and how much history would confirm it? |
 
+| Jensen's alpha (HAC t-stat) | Is there return unexplained by benchmark exposure? (A half-invested strategy has beta 0.5 and negative excess return but may still have alpha.) |
+
 Verdict per algorithm: **strong** (`p_fdr < 0.05`, DSR > 0.95, OOS excess Sharpe > 0,
 stability ≥ 60 %, ≥ 20 trades), **candidate** (`p_fdr < 0.10`, OOS excess Sharpe > 0,
-≥ 20 trades) or **none**. The batch also reports whether the best result is
-consistent with luck given the number of trials.
+≥ 20 trades) or **none**. A separate **alpha_edge** verdict applies the same idea to
+Jensen's alpha (FDR over N, alpha > 0 in and out of sample, residual stability ≥ 60 %).
+The batch also reports whether the best result is consistent with luck given N.
+
+Two switches matter for fairness: `--sizing active` spreads capital over the names a
+cross-sectional strategy actually holds (with `fixed`, a top-5-of-36 strategy is 86 %
+cash), and `--rebalance-band 0.25` stops resizing on every small weight change.
+`--prior-trials K` adds algorithms tried in earlier rounds or configurations to N, so
+a multi-round search cannot forget its own history.
+
+### What the lab found (September 2026)
+
+Six rounds on the Oslo universe (2010–2024, 0.1 % commission + 5 bps slippage,
+next-close fills), 796 trials counted, benchmark equal-weight buy-and-hold (Sharpe 0.97):
+
+- **No algorithm passes the pre-registered strong gate** in either view. Reality Check
+  p = 0.25, PBO = 0.11, random controls never flagged. The best in-sample excess Sharpe
+  (0.74, Donchian 100/50) fell to 0.23 out of sample.
+- **Two alpha-view candidates** (FDR p = 0.095): the Amihud **illiquidity ranking**
+  (alpha ≈ 12 %/yr, t = 3.1, beta 0.63, Sharpe 1.28 vs 0.97, positive in every 5-year
+  block and under leave-one-out) and a low-beta ranking (alpha absent 2020–24).
+- Caveats on the illiquidity result: the universe consists of survivors (LSEG's
+  historical constituent fields are not in this licence, so point-in-time membership
+  could not be built), and the picks trade 2–8 mNOK/day, so capacity is tiny.
+- Same libraries on 10 US mega-caps and 10 ETFs: nothing beats buy-and-hold.
 
 The lab tab of the website shows the verdict, an IS-vs-OOS excess-Sharpe scatter (the
 overfitting picture), the distribution of Sharpes against `E[max SR]`, the Reality
@@ -93,7 +128,7 @@ CI, sign-flip null, PSR, t-test), statistics, round trips, fills, drawdown episo
 portfolio-sim/
 ├── data/
 │   ├── loader.py               # fetch_prices() (closes) with parquet cache, load_csv()
-│   ├── market.py               # MarketData OHLCV bundle, fetch_market_data(), from_close()
+│   ├── market.py               # MarketData (OHLCV + extra series + dividends), fetch_market_data/external/dividends
 │   └── lseg.py                 # LSEGDataFeed
 ├── backtesting/
 │   ├── engine.py               # BacktestEngine: execution lag, rebalance, stops, sizing
@@ -109,11 +144,13 @@ portfolio-sim/
 │   ├── base.py                 # Strategy (+ stop_loss / take_profit / trailing_stop, requires)
 │   ├── _util.py                # indicators and signal shaping
 │   ├── technical.py, volume.py, cross_sectional.py, calendar.py, regime.py, random_control.py
+│   ├── macro.py, events.py, anomalies.py   # external-series, dividend and documented-anomaly families
 │   └── buy_and_hold.py, equal_weight.py, momentum.py, mean_reversion.py
 ├── research/
-│   ├── library.py              # AlgoSpec, ALGORITHMS (116), build_algorithm(), filter_algorithms()
-│   ├── edge.py                 # FDR/Holm, DSR, Reality Check, PBO (CSCV), stability, assess()
-│   ├── batch.py                # run_batch() -> BatchResult (parallel)
+│   ├── library.py              # AlgoSpec, ALGORITHMS (116) + OSLO_ALGORITHMS (92), library_for(universe)
+│   ├── universes.py            # named universes: tickers, macro symbols, sector map, load_universe()
+│   ├── edge.py                 # FDR/Holm, DSR, Reality Check, PBO (CSCV), Jensen alpha, assess()
+│   ├── batch.py                # run_batch() -> BatchResult (parallel, benchmark, sizing, prior trials)
 │   └── report.py               # batch_to_dict(), BatchStore
 ├── optimization/               # sweep.py (grid_search), efficient_frontier.py, rebalancing.py
 ├── pipeline/pipeline.py        # Pipeline: run() -> evaluate() -> report(); to_dict()
