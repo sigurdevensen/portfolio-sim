@@ -1,90 +1,82 @@
 # portfolio-sim
 
-Investment portfolio simulation system covering data ingestion, backtesting, risk analysis, and strategy testing.
+Quantitative trading research platform: data ingestion, backtesting, simulated
+execution, risk analysis, significance testing, parameter sweeps, and a local web
+platform with interactive reports.
 
 ## Tech Stack
 
 - **Python 3.11+** — primary language
-- **pandas / numpy** — data manipulation and numerical computation
-- **yfinance** — market data fetching
-- **matplotlib / plotly** — visualization
-- **pytest** — testing
+- **pandas / numpy / scipy** — data manipulation, statistics
+- **yfinance** (default) / **lseg-data** (optional) — market data
+- **FastAPI + uvicorn** — web backend; **Plotly.js via CDN + vanilla JS** — frontend
+- **matplotlib** — PNG charts for the Markdown report
+- **pytest** — testing (`fastapi.testclient` for the web app)
 
 ## Project Layout
 
 ```
 portfolio-sim/
-├── data/
-│   ├── raw/            # unmodified downloaded data
-│   ├── processed/      # cleaned, normalised data
-│   └── cache/          # cached API responses (gitignored)
-├── backtesting/        # core simulation engine
-│   ├── engine.py       # main backtest loop
-│   ├── portfolio.py    # portfolio state (positions, cash, NAV)
-│   └── metrics.py      # Sharpe, CAGR, drawdown, alpha, beta
-├── risk/               # risk analysis
-│   ├── var.py          # Value at Risk (historical, parametric, Monte Carlo)
-│   ├── drawdown.py     # drawdown series, max drawdown, recovery time
-│   └── correlation.py  # rolling correlations, heatmaps
-├── strategies/         # strategy implementations
-│   ├── base.py         # abstract Strategy class with generate_signals()
-│   ├── buy_and_hold.py
-│   ├── momentum.py
-│   ├── mean_reversion.py
-│   └── equal_weight.py
-├── optimization/       # portfolio optimisation
-│   ├── efficient_frontier.py
-│   └── rebalancing.py
-├── visualization/      # chart builders
-│   ├── performance.py  # NAV curves, benchmark comparison
-│   ├── risk.py         # VaR cones, drawdown plots
-│   └── comparison.py   # multi-strategy comparison
-├── scripts/            # runnable entry points
-│   ├── fetch_data.py
-│   ├── run_backtest.py
-│   └── run_analysis.py
-└── tests/              # pytest test suite
+├── data/                # loader.py (yfinance + parquet cache), lseg.py, cache/ (gitignored)
+├── backtesting/         # engine.py, portfolio.py, metrics.py, trades.py (round trips)
+├── execution/           # order.py, fill.py (slippage + commission)
+├── evaluation/          # evaluator.py, significance.py, serialize.py, reporter.py, html_reporter.py
+├── pipeline/            # pipeline.py — Pipeline.run().evaluate().report(); to_dict()
+├── risk/                # var.py, drawdown.py, correlation.py
+├── strategies/          # base.py + buy_and_hold, equal_weight, momentum, mean_reversion
+├── optimization/        # sweep.py (grid_search), efficient_frontier.py, rebalancing.py
+├── web/                 # app.py (FastAPI), store.py (RunStore), registry.py, static/
+├── scripts/             # serve.py, run_pipeline.py, run_sweep.py, fetch_data.py, ...
+├── reports/             # generated output; reports/runs/ holds platform runs (gitignored)
+└── tests/
 ```
 
 ## Common Commands
 
 ```bash
-# Install dependencies
 pip install -r requirements.txt
-
-# Fetch market data for a ticker list
-python scripts/fetch_data.py --tickers AAPL MSFT SPY --start 2015-01-01
-
-# Run a backtest
-python scripts/run_backtest.py --strategy momentum --start 2018-01-01 --end 2024-12-31
-
-# Run risk analysis on a portfolio
-python scripts/run_analysis.py --portfolio examples/sample_portfolio.json
-
-# Run tests
+python scripts/serve.py                      # platform at http://127.0.0.1:8000
+python scripts/run_pipeline.py --strategy momentum --param lookback=120 --param top_n=2 \
+    --tickers AAPL MSFT --benchmark SPY --start 2018-01-01 --end 2024-12-31 --output reports/momentum
+python scripts/run_sweep.py --strategy momentum --tickers AAPL MSFT --grid lookback=20,60,120 --grid top_n=1,2
 pytest tests/
 ```
 
 ## Conventions
 
-- All strategy classes inherit from `strategies/base.py:Strategy` and implement `generate_signals(data) -> pd.Series`.
-- Backtest results are returned as `BacktestResult` dataclasses — never raw dicts.
-- Data paths are resolved relative to the project root using `pathlib`. Never hardcode absolute paths.
-- Risk metrics always operate on return series (not price series) as input.
-- Dates are always timezone-aware (`UTC`) internally; localise only at the output layer.
-- Monetary values are stored as `float` (USD); no currency conversion layer at this time.
+- Strategies subclass `strategies/base.py:Strategy`, set `name`, and implement
+  `generate_signals(data) -> pd.DataFrame` of `{-1, 0, 1}` aligned to `data`.
+  Constructor kwargs must be typed with defaults — `web/registry.py` introspects them
+  to build the UI form and to coerce API parameters.
+- Engine semantics: fresh `1` opens or (with `rebalance=True`) resizes to target weight;
+  fresh `-1` closes; unchanged signal does nothing. `execution_lag=1` is the default
+  (fill at next close). Tests that need same-bar fills set `execution_lag=0`.
+- Backtest results are `BacktestResult` dataclasses; evaluated results are
+  `BacktestReport`. Never pass raw dicts between stages.
+- `evaluation/serialize.py:report_to_dict` is the single JSON contract consumed by
+  `web/static/report.js`, `RunStore` and `HTMLReporter`. Add new fields there and
+  render them in `report.js`; do not fork the schema.
+- `web/static/report.js` is shared by the platform page and the standalone
+  `report.html`. Charts read colours from CSS custom properties in `style.css`
+  (light + dark tokens). Never hardcode chart colours in JS.
+- Data paths are resolved relative to the project root with `pathlib`. Never hardcode absolute paths.
+- Risk metrics operate on return series, not prices.
+- Dates are timezone-aware UTC internally; localise only at the output layer.
+- Monetary values are `float`; no currency conversion.
+- Significance analysis is deterministic (`seed`); tests use small `n_samples`.
 
 ## Adding a New Strategy
 
-1. Create `strategies/<name>.py` subclassing `Strategy`.
-2. Implement `generate_signals(data)` returning a `pd.Series` of `{-1, 0, 1}`.
-3. Register it in `strategies/__init__.py`.
-4. Add at least one test in `tests/test_strategies.py`.
+1. Create `strategies/<name>.py` subclassing `Strategy` with typed `__init__` kwargs.
+2. Register it in `strategies/__init__.py` and `web/registry.py:STRATEGY_CLASSES`.
+3. Add at least one test in `tests/test_strategies.py`.
 
-## Data Sources
+## Testing notes
 
-- **yfinance** — equities, ETFs, crypto (default)
-- CSV drops go in `data/raw/` and are loaded via `data/loader.py`.
+- Web tests patch `pipeline.pipeline.fetch_prices` (imported at module level in the
+  pipeline) to avoid network access.
+- Chrome headless (`chrome.exe --headless=new --screenshot`) is a quick way to eyeball
+  a generated `report.html`.
 
 ## Not In Scope (yet)
 
@@ -92,3 +84,4 @@ pytest tests/
 - Options / derivatives pricing
 - Machine learning signal generation
 - Multi-currency portfolios
+- Authentication / multi-user deployment
