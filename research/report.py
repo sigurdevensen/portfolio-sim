@@ -46,6 +46,11 @@ def batch_to_dict(result: BatchResult, meta: dict[str, Any] | None = None) -> di
     top = list(lb.index[:TOP_NAVS])
     navs = {str(n): (result.navs[n] / result.navs[n].iloc[0] * 100).tolist() for n in top if n in result.navs}
     sharpes = lb["sharpe_full"].to_numpy(dtype=float)
+    excess = lb["excess_sharpe_full"].to_numpy(dtype=float) if "excess_sharpe_full" in lb else sharpes
+    bench_nav = None
+    if result.benchmark_nav is not None and len(result.benchmark_nav):
+        b = result.benchmark_nav
+        bench_nav = (b / b.iloc[0] * 100).tolist()
 
     meta_out: dict[str, Any] = {
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -65,6 +70,8 @@ def batch_to_dict(result: BatchResult, meta: dict[str, Any] | None = None) -> di
         "reality_check_observed": result.summary.get("reality_check_observed"),
         "pbo_logit_hist": _hist(result.edge.pbo_logits),
         "sharpe_hist": _hist(sharpes),
+        "excess_sharpe_hist": _hist(excess),
+        "benchmark_nav": bench_nav,
         "dates": [pd.Timestamp(d).isoformat() for d in result.returns.index],
         "navs": navs,
         "errors": dict(result.errors),

@@ -177,3 +177,59 @@ def test_low_trade_count_blocks_strong_verdict():
     n_trades = pd.Series(5, index=[f"algo_{i}" for i in range(20)])
     rep = assess(_frame(_planted(n=20)), n_trades=n_trades, n_boot=100, seed=0)
     assert rep.leaderboard.loc["algo_0", "edge"] == "none"
+
+
+# ── benchmark-relative edge (beta is not skill) ────────────────────────────
+
+def _bull_market(t: int = 1000, n: int = 30, seed: int = 11, mu_m: float = 0.001):
+    """All strategies share a strongly positive market factor plus zero-mean noise."""
+    rng = np.random.default_rng(seed)
+    market = rng.normal(mu_m, 0.01, t)
+    r = market[:, None] + rng.normal(0.0, 0.003, (t, n))
+    return r, market
+
+
+def _bench_series(market: np.ndarray) -> pd.Series:
+    idx = pd.date_range("2020-01-01", periods=len(market), freq="B", tz="UTC")
+    return pd.Series(market, index=idx, name="benchmark")
+
+
+def test_zero_benchmark_matches_no_benchmark():
+    r = _planted(n=10)
+    a = assess(_frame(r), n_boot=100, seed=0)
+    b = assess(_frame(r), benchmark=_bench_series(np.zeros(r.shape[0])), n_boot=100, seed=0)
+    pd.testing.assert_series_equal(a.leaderboard["p_fdr"], b.leaderboard["p_fdr"])
+    assert a.summary["reality_check_p"] == b.summary["reality_check_p"]
+
+
+def test_bull_market_beta_is_not_edge_when_benchmarked():
+    r, market = _bull_market()
+    n_trades = pd.Series(50, index=[f"algo_{i}" for i in range(r.shape[1])])
+    naive = assess(_frame(r), n_trades=n_trades, n_boot=200, seed=0)
+    benched = assess(_frame(r), benchmark=_bench_series(market), n_trades=n_trades, n_boot=200, seed=0)
+    assert naive.summary["n_fdr_5pct"] > 20            # against zero, almost everything "works"
+    assert benched.summary["n_strong"] == 0            # against the market, nothing does
+    assert benched.summary["reality_check_p"] > 0.05
+    assert benched.summary["best_is_consistent_with_luck"] is True
+
+
+def test_planted_alpha_over_market_is_detected():
+    r, market = _bull_market()
+    r[:, 0] += 0.002
+    n_trades = pd.Series(50, index=[f"algo_{i}" for i in range(r.shape[1])])
+    rep = assess(_frame(r), benchmark=_bench_series(market), n_trades=n_trades, n_boot=200, seed=0)
+    assert rep.leaderboard.index[0] == "algo_0"
+    assert rep.leaderboard.loc["algo_0", "edge"] == "strong"
+    assert rep.summary["reality_check_p"] < 0.05
+
+
+def test_benchmark_columns_and_summary_fields():
+    r, market = _bull_market(n=8)
+    rep = assess(_frame(r), benchmark=_bench_series(market), n_boot=100, seed=0)
+    for col in ("excess_sharpe_full", "excess_sharpe_is", "excess_sharpe_oos", "sharpe_full", "sharpe_oos"):
+        assert col in rep.leaderboard.columns, col
+    assert "benchmark_sharpe" in rep.summary
+    assert rep.summary["benchmark_sharpe"] > 1.0
+    # absolute Sharpe stays high while excess Sharpe is near zero
+    assert rep.leaderboard["sharpe_full"].mean() > 1.0
+    assert abs(rep.leaderboard["excess_sharpe_full"].mean()) < 0.5

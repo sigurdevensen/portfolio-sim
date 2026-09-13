@@ -273,6 +273,7 @@ def _metrics(r: np.ndarray) -> dict[str, np.ndarray]:
 def assess(
     returns: pd.DataFrame,
     n_trades: pd.Series | None = None,
+    benchmark: pd.Series | None = None,
     is_fraction: float = 0.6,
     n_boot: int = 1000,
     seed: int = 0,
@@ -285,6 +286,10 @@ def assess(
         returns: T x N DataFrame of daily strategy returns (columns = algorithm names).
         n_trades: Optional number of completed round trips per algorithm; fewer than
             ``min_trades`` blocks a ``strong``/``candidate`` verdict.
+        benchmark: Daily returns of the passive alternative (e.g. equal-weight
+            buy-and-hold of the same universe). Every edge statistic is computed on
+            returns in excess of it, so market beta is not mistaken for skill.
+            ``None`` means "versus cash" (benchmark = 0).
         is_fraction: Share of days used as in-sample for the IS/OOS split.
         n_boot: Bootstrap samples for the Reality Check.
         pbo_blocks: Blocks for CSCV (even; 16 -> 12 870 combinations).
@@ -297,18 +302,28 @@ def assess(
     split = int(t * is_fraction)
     r_is, r_oos = r[:split], r[split:]
 
-    full, ins, oos = _metrics(r), _metrics(r_is), _metrics(r_oos)
+    if benchmark is not None:
+        b = benchmark.reindex(returns.index).fillna(0.0).to_numpy(dtype=float)
+    else:
+        b = np.zeros(t)
+    x = r - b[:, None]                      # excess returns: the object of every edge test
+    x_is, x_oos = x[:split], x[split:]
 
-    t_stat, p_two = stats.ttest_1samp(r, 0.0, axis=0)
+    full, ins, oos = _metrics(r), _metrics(r_is), _metrics(r_oos)
+    ex_full = _sharpe_period(x) * math.sqrt(TRADING_DAYS)
+    ex_is = _sharpe_period(x_is) * math.sqrt(TRADING_DAYS)
+    ex_oos = _sharpe_period(x_oos) * math.sqrt(TRADING_DAYS)
+
+    t_stat, p_two = stats.ttest_1samp(x, 0.0, axis=0)
     t_stat = np.nan_to_num(t_stat)
     p_one = np.where(t_stat > 0, np.nan_to_num(p_two, nan=1.0) / 2, 1 - np.nan_to_num(p_two, nan=1.0) / 2)
 
-    psr = _psr(r, 0.0)
-    dsr = deflated_sharpe_ratio(r)
-    rc = reality_check(r, n_boot=n_boot, seed=seed)
-    pbo = pbo_cscv(r, n_blocks=pbo_blocks) if t >= 2 * pbo_blocks and n >= 2 else {"pbo": float("nan"), "logits": np.array([]), "n_combinations": 0}
-    stab = block_stability(r, k=5)
-    min_trl = np.array([min_track_record_length(r[:, j]) for j in range(n)])
+    psr = _psr(x, 0.0)
+    dsr = deflated_sharpe_ratio(x)
+    rc = reality_check(x, n_boot=n_boot, seed=seed)
+    pbo = pbo_cscv(x, n_blocks=pbo_blocks) if t >= 2 * pbo_blocks and n >= 2 else {"pbo": float("nan"), "logits": np.array([]), "n_combinations": 0}
+    stab = block_stability(x, k=5)
+    min_trl = np.array([min_track_record_length(x[:, j]) for j in range(n)])
 
     trades = (
         n_trades.reindex(names).fillna(0).to_numpy(dtype=float)
@@ -319,12 +334,13 @@ def assess(
     p_fdr = benjamini_hochberg(p_one)
     p_holm = holm(p_one)
 
-    strong = (p_fdr < 0.05) & (dsr > 0.95) & (oos["sharpe"] > 0) & (stab["stability"].to_numpy() >= 0.6) & enough_trades
-    candidate = ~strong & (p_fdr < 0.10) & (oos["sharpe"] > 0) & enough_trades
+    strong = (p_fdr < 0.05) & (dsr > 0.95) & (ex_oos > 0) & (stab["stability"].to_numpy() >= 0.6) & enough_trades
+    candidate = ~strong & (p_fdr < 0.10) & (ex_oos > 0) & enough_trades
     edge = np.where(strong, "strong", np.where(candidate, "candidate", "none"))
 
     lb = pd.DataFrame({
         "sharpe_full": full["sharpe"], "sharpe_is": ins["sharpe"], "sharpe_oos": oos["sharpe"],
+        "excess_sharpe_full": ex_full, "excess_sharpe_is": ex_is, "excess_sharpe_oos": ex_oos,
         "cagr_full": full["cagr"], "cagr_is": ins["cagr"], "cagr_oos": oos["cagr"],
         "total_return_full": full["total_return"], "max_drawdown_full": full["max_drawdown"],
         "max_drawdown_oos": oos["max_drawdown"], "volatility_full": full["volatility"],
@@ -333,12 +349,14 @@ def assess(
         "stability": stab["stability"].to_numpy(), "worst_block_sharpe": stab["worst_block_sharpe"].to_numpy(),
         "min_trl": min_trl, "n_trades": trades, "edge": edge,
     }, index=pd.Index(names, name="algorithm"))
-    lb = lb.sort_values(["sharpe_is"], ascending=False, kind="stable")
+    lb = lb.sort_values(["excess_sharpe_is"], ascending=False, kind="stable")
 
     best_is_name = str(lb.index[0])
-    sr_period = _sharpe_period(r)
+    sr_period = _sharpe_period(x)
     var_sr = float(np.var(sr_period, ddof=1)) if n > 1 else 0.0
-    corr = stats.spearmanr(ins["sharpe"], oos["sharpe"]).statistic if n > 2 else float("nan")
+    corr = stats.spearmanr(ex_is, ex_oos).statistic if n > 2 else float("nan")
+    b_std = b.std(ddof=1)
+    benchmark_sharpe = float(b.mean() / b_std * math.sqrt(TRADING_DAYS)) if b_std > 0 else 0.0
 
     summary = {
         "n_algorithms": int(n),
@@ -346,8 +364,11 @@ def assess(
         "is_days": int(split),
         "oos_days": int(t - split),
         "is_fraction": float(is_fraction),
+        "benchmark_sharpe": benchmark_sharpe,
+        "has_benchmark": benchmark is not None,
         "expected_max_sharpe": float(expected_max_sharpe(n, var_sr) * math.sqrt(TRADING_DAYS)),
-        "observed_max_sharpe": float(full["sharpe"].max()),
+        "observed_max_sharpe": float(ex_full.max()),
+        "observed_max_abs_sharpe": float(full["sharpe"].max()),
         "reality_check_p": float(rc["p_value"]),
         "reality_check_best": names[rc["best_index"]],
         "reality_check_observed": float(rc["observed_max"]),
@@ -358,8 +379,8 @@ def assess(
         "n_fdr_5pct": int((p_fdr < 0.05).sum()),
         "is_oos_rank_corr": float(corr) if corr is not None and not np.isnan(corr) else None,
         "best_is_name": best_is_name,
-        "best_is_sharpe_is": float(lb.iloc[0]["sharpe_is"]),
-        "best_is_oos_sharpe": float(lb.iloc[0]["sharpe_oos"]),
+        "best_is_sharpe_is": float(lb.iloc[0]["excess_sharpe_is"]),
+        "best_is_oos_sharpe": float(lb.iloc[0]["excess_sharpe_oos"]),
         "best_is_consistent_with_luck": bool(rc["p_value"] > 0.05 or (not np.isnan(pbo["pbo"]) and pbo["pbo"] > 0.5)),
         "n_boot": int(n_boot),
     }

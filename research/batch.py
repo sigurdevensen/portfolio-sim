@@ -14,6 +14,7 @@ from backtesting.trades import round_trips
 from data.market import MarketData
 from research.edge import EdgeReport, assess
 from research.library import AlgoSpec, build_algorithm
+from strategies.buy_and_hold import BuyAndHold
 
 
 @dataclass
@@ -53,6 +54,8 @@ class BatchResult:
     errors: dict[str, str]
     edge: EdgeReport
     market_meta: dict[str, Any] = field(default_factory=dict)
+    benchmark: pd.Series | None = None      # daily returns of equal-weight buy-and-hold
+    benchmark_nav: pd.Series | None = None
 
 
 # ── single-algorithm worker ───────────────────────────────────────────────
@@ -138,9 +141,15 @@ def run_batch(
     returns = navs.pct_change().fillna(0.0)
     n_trades = pd.Series({o["name"]: o["n_trades"] for o in good})
 
+    # The passive alternative: equal-weight buy-and-hold of the same universe, same
+    # costs and execution. Edge is measured in excess of it so beta is not "skill".
+    bench_result = BacktestEngine(engine_cfg).run(BuyAndHold(), market.close, market=market)
+    benchmark_nav = bench_result.nav.reindex(index)
+    benchmark = benchmark_nav.pct_change().fillna(0.0)
+
     edge = assess(
-        returns, n_trades=n_trades, is_fraction=config.is_fraction, n_boot=config.n_boot,
-        seed=config.seed, pbo_blocks=config.pbo_blocks, min_trades=config.min_trades,
+        returns, n_trades=n_trades, benchmark=benchmark, is_fraction=config.is_fraction,
+        n_boot=config.n_boot, seed=config.seed, pbo_blocks=config.pbo_blocks, min_trades=config.min_trades,
     )
 
     by_name = {s.name: s for s in specs}
@@ -161,10 +170,11 @@ def run_batch(
     summary["n_failed"] = len(errors)
     summary["n_random_controls_strong"] = int(((leaderboard["family"] == "random") & (leaderboard["edge"] == "strong")).sum())
     summary["families"] = sorted(leaderboard["family"].unique().tolist())
+    summary["benchmark_name"] = "buy_and_hold_equal_weight"
 
     return BatchResult(
         specs=specs, config=config, returns=returns, navs=navs, leaderboard=leaderboard,
-        summary=summary, errors=errors, edge=edge,
+        summary=summary, errors=errors, edge=edge, benchmark=benchmark, benchmark_nav=benchmark_nav,
         market_meta={"tickers": market.tickers, "start": str(market.index[0].date()),
                      "end": str(market.index[-1].date()), "synthetic": market.synthetic, "n_days": len(market.index)},
     )

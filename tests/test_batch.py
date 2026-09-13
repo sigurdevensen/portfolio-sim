@@ -108,3 +108,23 @@ def test_batch_store_round_trip(tmp_path):
     store.delete(bid)
     with pytest.raises(KeyError):
         store.load(bid)
+
+
+def test_batch_uses_equal_weight_buy_and_hold_benchmark():
+    market = _market()
+    res = run_batch(SPECS, market, _cfg(), n_jobs=1)
+    assert res.benchmark is not None
+    assert len(res.benchmark) == len(market.index)
+    assert res.summary["has_benchmark"] is True
+    assert res.summary["benchmark_name"] == "buy_and_hold_equal_weight"
+    for col in ("excess_sharpe_is", "excess_sharpe_oos", "excess_sharpe_full"):
+        assert col in res.leaderboard.columns
+    # buy-and-hold measured against itself has (near) zero excess Sharpe
+    assert abs(res.leaderboard.loc["buy_and_hold", "excess_sharpe_full"]) < 1e-6
+
+
+def test_batch_dict_carries_benchmark_nav_and_excess_hist():
+    res = run_batch(SPECS, _market(), _cfg(), n_jobs=1)
+    d = batch_to_dict(res)
+    assert len(d["benchmark_nav"]) == len(d["dates"])
+    assert d["excess_sharpe_hist"]["counts"]

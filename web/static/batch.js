@@ -80,8 +80,9 @@
     const luck = s.best_is_consistent_with_luck;
     const cls = s.n_strong > 0 && !luck ? "strong" : (s.n_candidate > 0 || !luck ? "weak" : "none");
     const parts = [];
-    parts.push("Tested " + s.n_algorithms + " algorithms. Under the null of no skill, the best of " + s.n_algorithms +
-      " is expected to reach a Sharpe of about " + fmt.num(s.expected_max_sharpe) + "; the observed best full-sample Sharpe is " + fmt.num(s.observed_max_sharpe) + ".");
+    const vs = s.has_benchmark ? "in excess of equal-weight buy-and-hold (Sharpe " + fmt.num(s.benchmark_sharpe) + ")" : "versus cash";
+    parts.push("Tested " + s.n_algorithms + " algorithms " + vs + ". Under the null of no skill, the best of " + s.n_algorithms +
+      " is expected to reach an excess Sharpe of about " + fmt.num(s.expected_max_sharpe) + "; the observed best is " + fmt.num(s.observed_max_sharpe) + ".");
     parts.push("White's Reality Check p = " + fmt.num(s.reality_check_p, 4) + " for the best algorithm (" + s.reality_check_best + ").");
     parts.push("Probability of Backtest Overfitting = " + fmt.pct(s.pbo, 0) + " across " + s.pbo_combinations + " in/out-of-sample splits.");
     parts.push(luck
@@ -102,12 +103,13 @@
       return t;
     };
     wrap.appendChild(tile("Algorithms tested", fmt.int(s.n_algorithms), "", s.n_failed ? s.n_failed + " failed" : "all completed"));
-    wrap.appendChild(tile("E[max Sharpe] under H0", fmt.num(s.expected_max_sharpe), "", "observed max " + fmt.num(s.observed_max_sharpe)));
+    wrap.appendChild(tile("Benchmark Sharpe", fmt.num(s.benchmark_sharpe), "", s.has_benchmark ? "equal-weight buy & hold" : "none (vs cash)"));
+    wrap.appendChild(tile("E[max excess Sharpe] under H0", fmt.num(s.expected_max_sharpe), "", "observed max " + fmt.num(s.observed_max_sharpe)));
     wrap.appendChild(tile("Reality Check p", fmt.num(s.reality_check_p, 4), s.reality_check_p < 0.05 ? "up" : "down", "best: " + s.reality_check_best));
     wrap.appendChild(tile("PBO", fmt.pct(s.pbo, 0), s.pbo > 0.5 ? "down" : (s.pbo < 0.2 ? "up" : ""), "prob. IS winner is below median OOS"));
     wrap.appendChild(tile("Strong edges", fmt.int(s.n_strong), s.n_strong > 0 ? "up" : "", s.n_candidate + " candidates · " + s.n_fdr_5pct + " pass FDR 5%"));
     wrap.appendChild(tile("IS→OOS rank corr.", fmt.num(s.is_oos_rank_corr), "", "Spearman across algorithms"));
-    wrap.appendChild(tile("Best in-sample", fmt.num(s.best_is_sharpe_is), "", s.best_is_name + " → OOS " + fmt.num(s.best_is_oos_sharpe)));
+    wrap.appendChild(tile("Best IS excess Sharpe", fmt.num(s.best_is_sharpe_is), "", s.best_is_name + " → OOS " + fmt.num(s.best_is_oos_sharpe)));
     wrap.appendChild(tile("Random controls flagged", fmt.int(s.n_random_controls_strong), s.n_random_controls_strong > 0 ? "down" : "up", "should be 0"));
     return wrap;
   }
@@ -115,39 +117,39 @@
   function renderScatter(data) {
     const t = theme();
     const rows = data.leaderboard || [];
-    const c = card("In-sample vs out-of-sample Sharpe", "Each point is one algorithm. Points below the diagonal degraded out of sample. Random controls are drawn as crosses.");
+    const c = card("In-sample vs out-of-sample excess Sharpe", "Sharpe of returns in excess of the buy-and-hold benchmark. Points below the diagonal degraded out of sample; anything left of zero never beat the benchmark. Random controls are crosses.");
     const div = chartDiv(); c.appendChild(div);
     const groups = { strong: { color: t.good, name: "Strong edge" }, candidate: { color: t.warning, name: "Candidate" }, none: { color: t.muted, name: "No edge" } };
     const traces = Object.entries(groups).map(([key, g]) => {
       const pts = rows.filter((r) => r.edge === key);
       return {
         type: "scatter", mode: "markers", name: g.name,
-        x: pts.map((r) => r.sharpe_is), y: pts.map((r) => r.sharpe_oos),
+        x: pts.map((r) => r.excess_sharpe_is != null ? r.excess_sharpe_is : r.sharpe_is), y: pts.map((r) => r.excess_sharpe_oos != null ? r.excess_sharpe_oos : r.sharpe_oos),
         text: pts.map((r) => r.name + " (" + r.family + ")"),
         marker: { size: 9, color: g.color, symbol: pts.map((r) => (r.family === "random" ? "x" : "circle")), line: { width: 1.5, color: t.surface } },
         hovertemplate: "%{text}<br>IS %{x:.2f} · OOS %{y:.2f}<extra></extra>",
       };
     });
-    const all = rows.flatMap((r) => [r.sharpe_is, r.sharpe_oos]).filter((v) => v != null && isFinite(v));
+    const all = rows.flatMap((r) => [r.excess_sharpe_is != null ? r.excess_sharpe_is : r.sharpe_is, r.excess_sharpe_oos != null ? r.excess_sharpe_oos : r.sharpe_oos]).filter((v) => v != null && isFinite(v));
     const lo = Math.min(-0.5, ...all), hi = Math.max(0.5, ...all);
     Plotly.newPlot(div, traces, baseLayout(t, {
       shapes: [{ type: "line", x0: lo, y0: lo, x1: hi, y1: hi, line: { color: t.axis, width: 1, dash: "dot" } }],
-      xaxis: Object.assign({}, baseLayout(t).xaxis, { title: { text: "In-sample Sharpe" }, zeroline: true }),
-      yaxis: Object.assign({}, baseLayout(t).yaxis, { title: { text: "Out-of-sample Sharpe" }, zeroline: true }),
+      xaxis: Object.assign({}, baseLayout(t).xaxis, { title: { text: "In-sample excess Sharpe" }, zeroline: true }),
+      yaxis: Object.assign({}, baseLayout(t).yaxis, { title: { text: "Out-of-sample excess Sharpe" }, zeroline: true }),
     }), CFG);
     return c;
   }
 
   function renderSharpeHist(data) {
     const t = theme(), s = data.summary || {};
-    const c = card("Distribution of full-sample Sharpe across algorithms", "The dashed line is the Sharpe the best of N noise strategies would be expected to reach.");
+    const c = card("Distribution of excess Sharpe across algorithms", "Full-sample Sharpe of returns in excess of the benchmark. The red line is the excess Sharpe the best of N skill-less strategies would be expected to reach.");
     const div = chartDiv(); c.appendChild(div);
-    const tr = histTrace(data.sharpe_hist, t.s1, "Algorithms", t);
+    const tr = histTrace(data.excess_sharpe_hist || data.sharpe_hist, t.s1, "Algorithms", t);
     Plotly.newPlot(div, tr ? [tr] : [], baseLayout(t, {
       bargap: 0, showlegend: false,
       shapes: [vline(s.expected_max_sharpe, t.s8, 2), vline(s.observed_max_sharpe, t.text, 2)],
       annotations: [label(s.expected_max_sharpe, "E[max] " + fmt.num(s.expected_max_sharpe), t.s8), label(s.observed_max_sharpe, "observed max", t.text)],
-      xaxis: Object.assign({}, baseLayout(t).xaxis, { title: { text: "Annualised Sharpe" } }),
+      xaxis: Object.assign({}, baseLayout(t).xaxis, { title: { text: "Annualised excess Sharpe" } }),
       yaxis: Object.assign({}, baseLayout(t).yaxis, { title: { text: "Algorithms" } }),
     }), CFG);
     return c;
@@ -193,6 +195,7 @@
     const div = chartDiv(); c.appendChild(div);
     const split = data.dates[Math.min(data.dates.length - 1, (data.summary || {}).is_days || 0)];
     const traces = names.map((n, i) => ({ type: "scatter", mode: "lines", name: n, x: data.dates, y: data.navs[n], line: { width: 1.6, color: palette[i % palette.length] }, hovertemplate: n + " %{y:.1f}<extra></extra>" }));
+    if (data.benchmark_nav) traces.push({ type: "scatter", mode: "lines", name: "Buy & hold (benchmark)", x: data.dates, y: data.benchmark_nav, line: { width: 2, color: t.muted, dash: "dot" }, hovertemplate: "benchmark %{y:.1f}<extra></extra>" });
     Plotly.newPlot(div, traces, baseLayout(t, {
       hovermode: "x unified", legend: { orientation: "h", y: -0.2, x: 0, font: { color: t.text2, size: 10 } }, margin: { l: 56, r: 16, t: 20, b: 90 },
       shapes: split ? [{ type: "line", x0: split, x1: split, y0: 0, y1: 1, yref: "paper", line: { color: t.axis, width: 1.5, dash: "dash" } }] : [],
@@ -204,7 +207,7 @@
 
   function renderLeaderboard(data, opts) {
     const rows = (data.leaderboard || []).slice();
-    const c = card("Leaderboard", "Click a column to sort, a row to load that algorithm into the backtest form. p_fdr is the Benjamini–Hochberg adjusted one-sided p-value; DSR is the Deflated Sharpe Ratio.");
+    const c = card("Leaderboard", "Excess = Sharpe of returns over the buy-and-hold benchmark; every p-value, DSR and stability figure is computed on those excess returns. p FDR is the Benjamini–Hochberg adjusted one-sided p-value; DSR is the Deflated Sharpe Ratio. Click a column to sort, a row to load the algorithm into the backtest form.");
     const controls = el("div", { class: "row", style: "margin-bottom:8px;max-width:520px" });
     const famSel = el("select");
     famSel.appendChild(el("option", { value: "", text: "All families" }));
@@ -219,9 +222,10 @@
       { key: "family", label: "Family" },
       { key: "data_type", label: "Data" },
       { key: "stops", label: "Stops", get: (r) => [r.stop_loss != null ? "SL " + fmt.pct(r.stop_loss, 0) : "", r.trailing_stop != null ? "TS " + fmt.pct(r.trailing_stop, 0) : "", r.take_profit != null ? "TP " + fmt.pct(r.take_profit, 0) : ""].filter(Boolean).join(" ") || "–" },
-      { key: "sharpe_is", label: "Sharpe IS", num: true, fmt: (v) => fmt.num(v) },
-      { key: "sharpe_oos", label: "Sharpe OOS", num: true, fmt: (v) => fmt.num(v), signed: true },
+      { key: "excess_sharpe_is", label: "Excess IS", num: true, fmt: (v) => fmt.num(v), signed: true },
+      { key: "excess_sharpe_oos", label: "Excess OOS", num: true, fmt: (v) => fmt.num(v), signed: true },
       { key: "sharpe_full", label: "Sharpe", num: true, fmt: (v) => fmt.num(v) },
+      { key: "sharpe_oos", label: "Sharpe OOS", num: true, fmt: (v) => fmt.num(v) },
       { key: "cagr_full", label: "CAGR", num: true, fmt: (v) => fmt.pct(v, 1), signed: true },
       { key: "max_drawdown_full", label: "Max DD", num: true, fmt: (v) => fmt.pct(v, 1) },
       { key: "n_trades", label: "Trades", num: true, fmt: (v) => fmt.int(v) },
@@ -231,7 +235,7 @@
       { key: "stability", label: "Stability", num: true, fmt: (v) => fmt.pct(v, 0) },
       { key: "edge", label: "Edge" },
     ];
-    let sortKey = "sharpe_is", sortDir = -1;
+    let sortKey = "excess_sharpe_is", sortDir = -1;
     const wrap = el("div", { class: "table-wrap" });
     const tbl = el("table"); const thead = el("thead"); const trh = el("tr");
     cols.forEach((col) => {
