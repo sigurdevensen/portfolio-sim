@@ -81,3 +81,91 @@ def test_fetch_market_data_uses_cache_second_time(mock_dl, tmp_path):
     assert mock_dl.call_count == 1
     assert m2.close["AAA"].iloc[-1] == 10.0
     assert m2.volume.shape == m2.close.shape
+
+
+# ── external series and dividends ──────────────────────────────────────────
+
+from data.market import fetch_dividends, fetch_external
+
+
+def test_from_close_has_empty_extra_and_no_dividends():
+    m = MarketData.from_close(_close())
+    assert m.extra == {}
+    assert m.dividends is None
+
+
+def test_extra_series_are_aligned_and_ffilled_on_attach():
+    close = _close(n=10)
+    raw = pd.Series([1.0, 2.0, 3.0], index=pd.DatetimeIndex([close.index[0], close.index[2], close.index[5]]))
+    m = MarketData.from_close(close)
+    m.attach_extra("brent", raw)
+    s = m.extra["brent"]
+    assert s.index.equals(close.index)
+    assert s.iloc[1] == 1.0          # forward-filled
+    assert s.iloc[-1] == 3.0
+    assert not s.isna().any()
+
+
+def test_attach_extra_accepts_dataframe():
+    close = _close(n=6)
+    df = pd.DataFrame({"a": range(6), "b": range(6)}, index=close.index)
+    m = MarketData.from_close(close)
+    m.attach_extra("macro", df)
+    assert m.extra["macro"].shape == (6, 2)
+
+
+def test_slice_keeps_extra_and_dividends():
+    close = _close(n=30)
+    m = MarketData.from_close(close)
+    m.attach_extra("vix", pd.Series(20.0, index=close.index))
+    m.dividends = pd.DataFrame(0.0, index=close.index, columns=close.columns)
+    m.dividends.iloc[20, 0] = 1.5
+    s = m.slice("2024-01-15", "2024-02-09")
+    assert s.extra["vix"].index.equals(s.close.index)
+    assert s.dividends.shape == s.close.shape
+    assert s.dividends.to_numpy().sum() == 1.5
+
+
+def test_require_extra_raises_helpful_error():
+    m = MarketData.from_close(_close())
+    with pytest.raises(KeyError, match="brent"):
+        m.require_extra("brent")
+
+
+def _fake_macro(tickers, start, end, auto_adjust=True, progress=False):
+    idx = pd.date_range(start, periods=12, freq="D")
+    cols = pd.MultiIndex.from_product([["Open", "High", "Low", "Close", "Volume"], tickers])
+    df = pd.DataFrame(1.0, index=idx, columns=cols)
+    for i, t in enumerate(tickers):
+        df[("Close", t)] = np.arange(12, dtype=float) + 10 * i
+    return df
+
+
+@patch("data.market.yf.download", side_effect=_fake_macro)
+def test_fetch_external_returns_named_close_frame(mock_dl, tmp_path):
+    ext = fetch_external({"brent": "BZ=F", "vix": "^VIX"}, "2024-01-01", "2024-01-31", cache_dir=tmp_path)
+    assert list(ext.columns) == ["brent", "vix"]
+    assert ext.index.tz is not None
+    assert ext["vix"].iloc[0] == 10.0
+    fetch_external({"brent": "BZ=F", "vix": "^VIX"}, "2024-01-01", "2024-01-31", cache_dir=tmp_path)
+    assert mock_dl.call_count == 1  # cached
+
+
+class _FakeTicker:
+    def __init__(self, symbol):
+        self.symbol = symbol
+
+    @property
+    def dividends(self):
+        idx = pd.DatetimeIndex(["2024-01-03", "2024-01-10"], tz="Europe/Oslo")
+        return pd.Series([1.0, 2.0], index=idx, name="Dividends")
+
+
+@patch("data.market.yf.Ticker", side_effect=_FakeTicker)
+def test_fetch_dividends_aligned_to_index(mock_tk, tmp_path):
+    close = _close(n=10)  # 2024-01-01 .. business days
+    div = fetch_dividends(["AAA", "BBB"], close.index, cache_dir=tmp_path)
+    assert div.shape == close.shape
+    assert div.loc["2024-01-03", "AAA"] == 1.0
+    assert div.loc["2024-01-10", "BBB"] == 2.0
+    assert div.to_numpy().sum() == 6.0
