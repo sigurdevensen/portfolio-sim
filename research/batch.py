@@ -34,6 +34,7 @@ class BatchConfig:
     pbo_blocks: int = 16
     min_trades: int = 20
     sizing: str = "fixed"          # see BacktestConfig.sizing
+    rebalance_band: float = 0.0    # see BacktestConfig.rebalance_band
     prior_trials: int = 0          # algorithms tried in earlier rounds/configurations, added to N
 
     def engine_config(self) -> BacktestConfig:
@@ -42,6 +43,7 @@ class BatchConfig:
             commission=self.commission, slippage=self.slippage_bps / 10_000,
             execution_lag=self.execution_lag, rebalance=self.rebalance,
             max_weight=self.max_weight, risk_free_rate=self.risk_free_rate, sizing=self.sizing,
+            rebalance_band=self.rebalance_band,
         )
 
 

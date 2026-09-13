@@ -360,3 +360,53 @@ def test_active_sizing_rebalances_when_active_set_changes():
 def test_invalid_sizing_rejected():
     with pytest.raises(ValueError, match="sizing"):
         BacktestConfig(start="2023-01-01", end="2023-02-01", sizing="magic")
+
+
+# ── rebalance band ─────────────────────────────────────────────────────────
+
+def test_rebalance_band_skips_small_resizes_on_fresh_signal():
+    """Prices drift 5 %; a 25 % band means the fresh long signal does not trigger a resize."""
+    idx = pd.date_range("2023-01-02", periods=4, freq="B", tz="UTC")
+    prices = pd.DataFrame({"AAA": [100.0, 100.0, 105.0, 105.0], "BBB": [100.0] * 4}, index=idx)
+    cfg = _cfg0()
+    cfg.rebalance_band = 0.25
+    result = BacktestEngine(cfg).run(PulseStrategy(), prices)
+    assert len(result.trades) == 2                        # two entries only, no rebalance trades
+    cfg.rebalance_band = 0.0
+    result2 = BacktestEngine(cfg).run(PulseStrategy(), prices)
+    assert len(result2.trades) > 2                        # without a band the resize happens
+
+
+def test_rebalance_band_still_allows_large_resizes():
+    cfg = _cfg0()
+    cfg.rebalance_band = 0.10
+    result = BacktestEngine(cfg).run(PulseStrategy(), _rebalance_prices())   # AAA doubles -> 26 % overweight
+    sells = result.trades[(result.trades["ticker"] == "AAA") & (result.trades["direction"] == -1)]
+    assert len(sells) == 1
+
+
+def test_active_sizing_with_band_reduces_churn():
+    rng = np.random.default_rng(0)
+    n = 120
+    idx = pd.date_range("2023-01-02", periods=n, freq="B", tz="UTC")
+    prices = pd.DataFrame({t: 100 * np.cumprod(1 + rng.normal(0, 0.02, n)) for t in ["AAA", "BBB", "CCC", "DDD"]}, index=idx)
+
+    class Rotating(Strategy):
+        name = "rotating"
+
+        def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+            sig = pd.DataFrame(-1, index=data.index, columns=data.columns)
+            sig["AAA"] = 1
+            sig.loc[sig.index[::3], "BBB"] = 1         # BBB flickers in and out
+            return sig
+
+    cfg_no = _cfg0(); cfg_no.sizing = "active"
+    cfg_band = _cfg0(); cfg_band.sizing = "active"; cfg_band.rebalance_band = 0.25
+    fills_no = len(BacktestEngine(cfg_no).run(Rotating(), prices).trades)
+    fills_band = len(BacktestEngine(cfg_band).run(Rotating(), prices).trades)
+    assert fills_band < fills_no
+
+
+def test_negative_band_rejected():
+    with pytest.raises(ValueError, match="rebalance_band"):
+        BacktestConfig(start="2023-01-01", end="2023-02-01", rebalance_band=-0.1)

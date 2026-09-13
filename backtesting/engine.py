@@ -33,6 +33,7 @@ class BacktestConfig:
     max_weight: float | None = None  # cap on per-ticker target weight
     risk_free_rate: float = 0.0    # annualised, used for Sharpe/Sortino
     sizing: str = "fixed"          # "fixed": 1/n_tickers each; "active": 1/n_active_longs each
+    rebalance_band: float = 0.0    # skip resizing a held name unless |target/current - 1| exceeds this
 
     def __post_init__(self) -> None:
         if self.execution_lag < 0:
@@ -41,6 +42,8 @@ class BacktestConfig:
             raise ValueError("max_weight must be in (0, 1]")
         if self.sizing not in ("fixed", "active"):
             raise ValueError("sizing must be 'fixed' or 'active'")
+        if self.rebalance_band < 0:
+            raise ValueError("rebalance_band must be >= 0")
 
 
 class BacktestEngine:
@@ -156,6 +159,8 @@ class BacktestEngine:
                             continue
                         price = valid_prices[ticker]
                         target_shares = self._target_shares(nav * weight, price, fill_sim)
+                        if not self._outside_band(target_shares, pos.shares):
+                            continue
                         delta = target_shares - pos.shares
                         if delta < 0:
                             self._sell(portfolio, fill_sim, fills_log, ticker, -delta, price, date, "rebalance")
@@ -182,7 +187,7 @@ class BacktestEngine:
                         if target_shares > 0:
                             self._buy(portfolio, fill_sim, fills_log, ticker, target_shares, price, date, "signal")
                             peak[ticker] = price
-                    elif self.config.rebalance:
+                    elif self.config.rebalance and self._outside_band(target_shares, held.shares):
                         delta = target_shares - held.shares
                         if delta > 0:
                             self._buy(portfolio, fill_sim, fills_log, ticker, delta, price, date, "rebalance")
@@ -212,6 +217,12 @@ class BacktestEngine:
         if self.config.execution_lag > 0:
             sig = sig.shift(self.config.execution_lag).fillna(0)
         return sig.astype(int)
+
+    def _outside_band(self, target_shares: float, current_shares: float) -> bool:
+        """True when the resize is large enough to be worth the transaction costs."""
+        if self.config.rebalance_band <= 0 or current_shares <= 0:
+            return True
+        return abs(target_shares / current_shares - 1.0) > self.config.rebalance_band
 
     @staticmethod
     def _target_shares(target_value: float, price: float, fill_sim: FillSimulator) -> float:

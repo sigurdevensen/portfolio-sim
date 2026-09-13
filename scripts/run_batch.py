@@ -43,6 +43,8 @@ def main() -> None:
     parser.add_argument("--min-trades", type=int, default=20)
     parser.add_argument("--sizing", choices=["fixed", "active"], default="fixed",
                         help="fixed: 1/n_tickers per name; active: 1/n_held per name (fully invested)")
+    parser.add_argument("--rebalance-band", type=float, default=0.0,
+                        help="Only resize a held name when |target/current-1| exceeds this (e.g. 0.25)")
     parser.add_argument("--prior-trials", type=int, default=0,
                         help="Algorithms tried in earlier rounds/configs; added to N for the corrections")
     parser.add_argument("--n-jobs", type=int, default=1, help="Worker processes (0 = all cores)")
@@ -74,7 +76,7 @@ def main() -> None:
         start=args.start, end=args.end, initial_capital=args.capital, commission=args.commission,
         slippage_bps=args.slippage_bps, execution_lag=args.execution_lag, is_fraction=args.is_fraction,
         n_boot=args.n_boot, pbo_blocks=args.pbo_blocks, min_trades=args.min_trades,
-        sizing=args.sizing, prior_trials=args.prior_trials,
+        sizing=args.sizing, prior_trials=args.prior_trials, rebalance_band=args.rebalance_band,
     )
     print(f"Testing {len(specs)} of {len(library_for(args.universe))} algorithms on {args.tickers} ({args.start} -> {args.end}), "
           f"{len(market.index)} days, n_jobs={args.n_jobs} ...")
@@ -89,7 +91,7 @@ def main() -> None:
     print(f"\nDone in {time.time() - t0:.1f}s. {s['n_algorithms']} algorithms, {s['n_failed']} failed.")
     print("\n-- Batch verdict (all statistics on returns in EXCESS of equal-weight buy-and-hold) --")
     print(f"  Benchmark Sharpe (buy & hold): {s['benchmark_sharpe']:.2f}")
-    print(f"  Sizing: {args.sizing}   trials counted N={s['n_trials']} (this batch {s['n_algorithms']} + prior {args.prior_trials})")
+    print(f"  Sizing: {args.sizing} (band {args.rebalance_band})   trials counted N={s['n_trials']} (this batch {s['n_algorithms']} + prior {args.prior_trials})")
     print(f"  Expected max excess Sharpe under H0 (N={s['n_trials']}): {s['expected_max_sharpe']:.2f}"
           f"   observed max: {s['observed_max_sharpe']:.2f}")
     print(f"  White's Reality Check p-value:  {s['reality_check_p']:.4f}   (best: {s['reality_check_best']})")
