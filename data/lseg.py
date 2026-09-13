@@ -66,6 +66,7 @@ class LSEGDataFeed:
             )
 
         try:
+            ld.open_session()
             raw = ld.get_history(
                 universe=tickers,
                 fields=["TRDPRC_1", "OFF_CLOSE"],
@@ -77,6 +78,11 @@ class LSEGDataFeed:
             raise RuntimeError(
                 f"LSEG session error: {exc}. Ensure LSEG Workspace is running."
             ) from exc
+        finally:
+            try:
+                ld.close_session()
+            except Exception:
+                pass
 
         prices = self._normalise_price_df(raw, tickers)
 
@@ -103,6 +109,7 @@ class LSEGDataFeed:
             )
 
         try:
+            ld.open_session()
             df = ld.get_data(
                 universe=tickers,
                 fields=list(_FUNDAMENTAL_FIELD_MAP.keys()),
@@ -111,6 +118,11 @@ class LSEGDataFeed:
             raise RuntimeError(
                 f"LSEG session error: {exc}. Ensure LSEG Workspace is running."
             ) from exc
+        finally:
+            try:
+                ld.close_session()
+            except Exception:
+                pass
 
         df = df.rename(columns=_FUNDAMENTAL_FIELD_MAP)
         return {idx: row.to_dict() for idx, row in df.iterrows()}
@@ -133,6 +145,7 @@ class LSEGDataFeed:
             )
 
         try:
+            ld.open_session()
             df = ld.get_data(
                 universe=index_ric,
                 fields=["TR.IndexConstituentRIC"],
@@ -141,6 +154,11 @@ class LSEGDataFeed:
             raise RuntimeError(
                 f"LSEG session error: {exc}. Ensure LSEG Workspace is running."
             ) from exc
+        finally:
+            try:
+                ld.close_session()
+            except Exception:
+                pass
 
         col = "TR.IndexConstituentRIC"
         if col not in df.columns:
