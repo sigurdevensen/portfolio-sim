@@ -182,3 +182,18 @@ button.ghost { background: transparent; cursor: pointer; width: auto; padding: 4
 .runs .meta { font-size: 12px; color: var(--muted); }
 .runs .ret { font-variant-numeric: tabular-nums; font-size: 13px; }
 .empty { color: var(--muted); font-size: 13px; padding: 20px; text-align: center; }
+
+/* ── tabs & lab ─────────────────────────────────────────────────────── */
+.tabs { display: flex; gap: 4px; }
+.tab {
+  width: auto; background: transparent; border: 1px solid transparent; color: var(--text-2);
+  padding: 6px 12px; border-radius: 999px; cursor: pointer; font-weight: 600; font-size: 13px;
+}
+.tab:hover { background: var(--surface-2); }
+.tab.active { background: var(--surface-2); color: var(--text); border-color: var(--border); }
+select[multiple] { min-height: 120px; }
+td.edge-strong { color: var(--good-text); font-weight: 600; }
+td.edge-candidate { color: #9a6b00; font-weight: 600; }
+td.edge-none { color: var(--muted); }
+:root[data-theme="dark"] td.edge-candidate { color: var(--warning); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) td.edge-candidate { color: var(--warning); } }

@@ -11,12 +11,17 @@
 <div class="shell">
   <div class="topbar">
     <div class="brand"><span class="dot"></span><h1>portfolio-sim</h1><span class="muted">quantitative trading platform</span></div>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="backtest" type="button">Backtest</button>
+      <button class="tab" data-tab="lab" type="button">Algorithm lab</button>
+    </nav>
     <div class="spacer"></div>
     <a id="report-link" class="muted" href="#" hidden target="_blank" rel="noopener">Open standalone report ↗</a>
     <button class="ghost" id="theme-toggle" type="button">Toggle theme</button>
   </div>
 
-  <div class="platform">
+  <!-- ── Backtest tab ─────────────────────────────────────────────────── -->
+  <section id="tab-backtest" class="platform">
     <aside>
       <div class="card">
         <h2>New backtest</h2>
@@ -78,9 +83,66 @@
     <main id="report">
       <div class="card"><div class="empty">Run a backtest or pick a saved run to see its report.</div></div>
     </main>
-  </div>
+  </section>
+
+  <!-- ── Algorithm lab tab ────────────────────────────────────────────── -->
+  <section id="tab-lab" class="platform" hidden>
+    <aside>
+      <div class="card">
+        <h2>Test the whole library</h2>
+        <p class="muted" style="font-size:12px;margin:0 0 6px">Runs every selected algorithm on the same data with fixed parameters, then applies multiple-testing corrections so the best result is judged against the number of trials.</p>
+        <form id="batch-form">
+          <label for="b_tickers">Universe (tickers)</label>
+          <input id="b_tickers" name="tickers" value="AAPL MSFT NVDA AMZN GOOGL META JPM XOM JNJ PG" required>
+          <div class="row">
+            <div><label for="b_start">Start</label><input id="b_start" name="start" type="date" value="2015-01-01" required></div>
+            <div><label for="b_end">End</label><input id="b_end" name="end" type="date" value="2024-12-31" required></div>
+          </div>
+          <label for="b_families">Families (empty = all) <span class="muted" id="algo-count"></span></label>
+          <select id="b_families" name="families" multiple size="6"></select>
+          <div class="row">
+            <div><label for="b_limit">Max algorithms (blank = all)</label><input id="b_limit" name="limit" type="number" min="1" placeholder="e.g. 30"></div>
+            <div><label for="b_n_jobs">Worker processes (0 = all cores)</label><input id="b_n_jobs" name="n_jobs" type="number" min="0" max="64" value="0"></div>
+          </div>
+          <div class="row">
+            <div><label for="b_is_fraction">In-sample fraction</label><input id="b_is_fraction" name="is_fraction" type="number" step="0.05" min="0.3" max="0.8" value="0.6"></div>
+            <div><label for="b_n_boot">Bootstraps</label><input id="b_n_boot" name="n_boot" type="number" min="50" max="20000" step="50" value="1000"></div>
+          </div>
+          <div class="row">
+            <div><label for="b_pbo_blocks">CSCV blocks (even)</label><input id="b_pbo_blocks" name="pbo_blocks" type="number" min="2" max="20" step="2" value="16"></div>
+            <div><label for="b_min_trades">Min trades for a verdict</label><input id="b_min_trades" name="min_trades" type="number" min="0" value="20"></div>
+          </div>
+          <div class="row">
+            <div><label for="b_commission">Commission (fraction)</label><input id="b_commission" name="commission" type="number" step="any" value="0.001"></div>
+            <div><label for="b_slippage_bps">Slippage (bps)</label><input id="b_slippage_bps" name="slippage_bps" type="number" step="any" value="5"></div>
+          </div>
+          <div class="row">
+            <div><label for="b_execution_lag">Execution lag (bars)</label><input id="b_execution_lag" name="execution_lag" type="number" min="0" value="1"></div>
+            <div><label for="b_data_source">Data source</label>
+              <select id="b_data_source" name="data_source"><option value="yfinance">yfinance</option><option value="lseg">LSEG Workspace</option></select></div>
+          </div>
+          <div style="margin-top:14px"><button class="primary" type="submit" id="batch-btn">Run batch</button></div>
+          <div class="status" id="batch-status"></div>
+          <div class="error" id="batch-error"></div>
+        </form>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <h2 style="margin:0">Saved batches</h2>
+          <button class="ghost" id="refresh-batches" type="button">Refresh</button>
+        </div>
+        <ul class="runs" id="batches"></ul>
+      </div>
+    </aside>
+
+    <main id="batch-report">
+      <div class="card"><div class="empty">Run a batch or pick a saved one to see the leaderboard and overfitting diagnostics.</div></div>
+    </main>
+  </section>
 </div>
 <script src="/static/report.js"></script>
+<script src="/static/batch.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

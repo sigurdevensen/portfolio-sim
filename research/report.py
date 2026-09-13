@@ -62,7 +62,7 @@ def batch_to_dict(result: BatchResult, meta: dict[str, Any] | None = None) -> di
         "leaderboard": rows,
         "families": sorted(lb["family"].unique().tolist()),
         "reality_check_hist": _hist(result.edge.reality_check_distribution),
-        "reality_check_observed": result.summary.get("observed_max_sharpe"),
+        "reality_check_observed": result.summary.get("reality_check_observed"),
         "pbo_logit_hist": _hist(result.edge.pbo_logits),
         "sharpe_hist": _hist(sharpes),
         "dates": [pd.Timestamp(d).isoformat() for d in result.returns.index],

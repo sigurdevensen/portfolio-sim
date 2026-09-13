@@ -192,3 +192,75 @@ def test_run_report_html_written_alongside(client, tmp_path):
     r = client.get(f"/runs/{rid}/report.html")
     assert r.status_code == 200
     assert "renderReport" in r.text
+
+
+# ── Algorithm lab API ──────────────────────────────────────────────────────
+
+from data.market import MarketData
+from research.report import BatchStore
+
+
+def _fake_market(tickers, start, end, use_cache=True, cache_dir=None):
+    rng = np.random.default_rng(7)
+    idx = pd.date_range("2021-01-04", periods=400, freq="B", tz="UTC")
+    close = pd.DataFrame({t: 100 * np.cumprod(1 + rng.normal(0.0004, 0.012, 400)) for t in tickers}, index=idx)
+    m = MarketData.from_close(close)
+    m.volume.loc[:, :] = rng.integers(500, 1500, size=close.shape).astype(float)
+    return m
+
+
+@pytest.fixture
+def lab_client(tmp_path):
+    app = create_app(RunStore(tmp_path / "runs"), BatchStore(tmp_path / "batches"))
+    with patch("web.app.fetch_market_data", side_effect=_fake_market):
+        with TestClient(app) as c:
+            yield c
+
+
+def _batch_request(**overrides):
+    body = {"tickers": ["AAA", "BBB", "CCC"], "start": "2021-01-04", "end": "2022-12-31",
+            "families": ["buy_and_hold", "sma_cross", "random"], "limit": 8, "n_boot": 100,
+            "pbo_blocks": 8, "n_jobs": 1}
+    body.update(overrides)
+    return body
+
+
+def test_list_algorithms(lab_client):
+    r = lab_client.get("/api/algorithms")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["count"] >= 100
+    assert "sma_cross" in body["families"]
+    assert body["algorithms"][0]["name"]
+
+
+def test_batch_endpoint_runs_and_saves(lab_client, tmp_path):
+    r = lab_client.post("/api/batch", json=_batch_request())
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["meta"]["batch_id"]
+    assert d["meta"]["n_algorithms"] == 8
+    assert len(d["leaderboard"]) == 8
+    assert "pbo" in d["summary"]
+    assert (tmp_path / "batches" / d["meta"]["batch_id"] / "batch.json").exists()
+    assert (tmp_path / "batches" / d["meta"]["batch_id"] / "batch.html").exists()
+
+
+def test_batches_listed_fetched_deleted(lab_client):
+    bid = lab_client.post("/api/batch", json=_batch_request(limit=4)).json()["meta"]["batch_id"]
+    listed = lab_client.get("/api/batches").json()
+    assert listed[0]["batch_id"] == bid
+    assert lab_client.get(f"/api/batches/{bid}").status_code == 200
+    assert lab_client.get(f"/batches/{bid}/report.html").status_code == 200
+    assert lab_client.delete(f"/api/batches/{bid}").status_code == 204
+    assert lab_client.get(f"/api/batches/{bid}").status_code == 404
+
+
+def test_batch_unknown_family_400(lab_client):
+    r = lab_client.post("/api/batch", json=_batch_request(families=["nope"]))
+    assert r.status_code == 400
+
+
+def test_index_has_lab_tab(lab_client):
+    assert "Algorithm lab" in lab_client.get("/").text
+    assert lab_client.get("/static/batch.js").status_code == 200

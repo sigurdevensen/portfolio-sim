@@ -350,6 +350,7 @@ def assess(
         "observed_max_sharpe": float(full["sharpe"].max()),
         "reality_check_p": float(rc["p_value"]),
         "reality_check_best": names[rc["best_index"]],
+        "reality_check_observed": float(rc["observed_max"]),
         "pbo": float(pbo["pbo"]),
         "pbo_combinations": int(pbo["n_combinations"]),
         "n_strong": int((edge == "strong").sum()),
