@@ -4,12 +4,10 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
-from strategies import BuyAndHold, EqualWeight, MeanReversion, Momentum
+from strategies import ALL_FAMILIES
 from strategies.base import Strategy
 
-STRATEGY_CLASSES: dict[str, type[Strategy]] = {
-    cls.name: cls for cls in (BuyAndHold, EqualWeight, Momentum, MeanReversion)
-}
+STRATEGY_CLASSES: dict[str, type[Strategy]] = {cls.name: cls for cls in ALL_FAMILIES}
 
 _TYPE_NAMES = {int: "int", float: "float", str: "str", bool: "bool"}
 _CASTERS = {
