@@ -18,12 +18,12 @@ local web platform with interactive reports.
 
 ```
 portfolio-sim/
-├── data/                # loader.py (closes), market.py (MarketData OHLCV), lseg.py, cache/ (gitignored)
+├── data/                # loader.py (closes), market.py (MarketData OHLCV), lseg.py, deribit.py (BTC dated futures), cache/ (gitignored)
 ├── backtesting/         # engine.py (lag, rebalance, stops), portfolio.py, metrics.py, trades.py
 ├── execution/           # order.py, fill.py
 ├── evaluation/          # evaluator.py, significance.py, serialize.py, reporter.py, html_reporter.py
 ├── strategies/          # base.py, _util.py, technical/volume/cross_sectional/calendar/regime/macro/events/anomalies/random_control.py
-├── research/            # library.py (116 + 92 AlgoSpecs), universes.py, edge.py (FDR/DSR/RC/PBO/alpha), batch.py, report.py
+├── research/            # library.py (116 + 92 AlgoSpecs), universes.py, edge.py (FDR/DSR/RC/PBO/alpha), batch.py, report.py, basis.py (BTC cash-and-carry)
 ├── optimization/        # sweep.py, efficient_frontier.py, rebalancing.py
 ├── pipeline/            # pipeline.py — Pipeline.run().evaluate().report(); to_dict()
 ├── risk/                # var.py, drawdown.py, correlation.py
@@ -42,6 +42,7 @@ python scripts/run_batch.py --universe oslo --n-jobs 0 --sizing active --rebalan
 python scripts/run_batch.py --tickers AAPL MSFT NVDA --start 2015-01-01 --n-jobs 0 --output reports/batches/demo
 python scripts/run_pipeline.py --strategy momentum --param lookback=120 --tickers AAPL MSFT --benchmark SPY
 python scripts/run_sweep.py --strategy momentum --tickers AAPL MSFT --grid lookback=20,60,120
+python scripts/run_basis_arb.py --output reports/basis_arb   # BTC spot vs Deribit futures basis backtest
 pytest tests/                                # ~1 minute; batch tests use n_jobs=1 and tiny n_boot
 ```
 
