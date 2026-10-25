@@ -223,3 +223,4 @@ data/cache/
 # portfolio-sim: generated reports and saved platform runs
 reports/runs/
 reports/smoke*/
+reports/
